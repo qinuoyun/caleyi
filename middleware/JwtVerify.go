@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"github.com/qinuoyun/caleyi/utils/ci"
 )

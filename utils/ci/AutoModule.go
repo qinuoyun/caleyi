@@ -24,6 +24,7 @@ func SetDB(db *gorm.DB) {
 	_DB = db
 }
 
+// RegisterModule
 func RegisterModule(module interface{}, path string) bool {
 	vbf := reflect.ValueOf(module)
 	//非模型或无方法则直接返回

@@ -9,6 +9,8 @@ import (
 
 func BootStart() {
 
+	fmt.Println("证明从我开始的")
+
 	//加载路由
 	r := common.InitRouter()
 
