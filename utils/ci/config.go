@@ -1,8 +1,11 @@
 package ci
 
 import (
+	"fmt"
 	"gopkg.in/ini.v1"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -35,12 +38,33 @@ type RedisConfig struct {
 }
 
 func C(key string) string {
+	// 检查是否为开发环境（通过环境变量或命令行参数判断）
+	isDev := os.Getenv("APP_ENV") == "development"
+	var configPath string // 只需要配置文件路径，cacheDir用不到可以删除
+
+	if isDev {
+		// 开发环境：使用相对路径（基于当前工作目录）
+		configPath = "config.ini" // 假设开发时config.ini在项目根目录
+	} else {
+		// 生产环境：使用可执行文件所在目录
+		exePath, err := os.Executable()
+		if err != nil {
+			fmt.Printf("获取可执行文件路径失败: %v\n", err)
+			// 发生错误时可以考虑使用默认路径或者退出
+			configPath = "config.ini" // 默认回退路径
+		} else {
+			exeDir := filepath.Dir(exePath)
+			configPath = filepath.Join(exeDir, "config.ini")
+		}
+	}
 	once.Do(func() {
 		instance = &Config{}
-		cfg, err := ini.Load("./config.ini")
+		// 使用计算得到的configPath而不是硬编码路径
+		cfg, err := ini.Load(configPath)
 		if err != nil {
 			log.Fatalf("Fail to read file: %v", err)
 		}
+		// 其他配置加载代码保持不变
 		instance.AppName = cfg.Section("").Key("app_name").String()
 		instance.LogLevel = cfg.Section("").Key("log_level").String()
 		instance.AdminPath = cfg.Section("").Key("admin_path").String()

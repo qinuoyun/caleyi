@@ -3,9 +3,51 @@ package ci
 import (
 	"fmt"
 	"github.com/go-playground/validator/v10"
+	"reflect"
 	"regexp"
 	"strings"
 )
+
+// GetControllerModuleName 从控制器对象中提取模块名称
+// 例如：*controllers.UserController → /user/
+func GetControllerModuleName(controller interface{}) string {
+	// 获取控制器类型名称（包含包路径）
+	ctrlTypeName := reflect.TypeOf(controller).String()
+
+	// 移除指针符号（如果有）
+	if strings.HasPrefix(ctrlTypeName, "*") {
+		ctrlTypeName = ctrlTypeName[1:]
+	}
+
+	// 提取基础类型名称（去除包路径）
+	typeName := ctrlTypeName
+	if dotIndex := strings.LastIndex(typeName, "."); dotIndex != -1 {
+		typeName = typeName[dotIndex+1:]
+	}
+
+	// 移除 "Controller" 后缀
+	if strings.HasSuffix(typeName, "Controller") {
+		typeName = strings.TrimSuffix(typeName, "Controller")
+	}
+
+	// 处理特殊情况：Index → /
+	if typeName == "Index" {
+		return "/"
+	}
+
+	// 转换为小写并添加斜杠前缀和后缀
+	return "/" + strings.ToLower(typeName) + "/"
+}
+
+// RemoveStarFromTypeName 去除类型名称中的 * 号
+func RemoveStarFromTypeName(module interface{}) string {
+	ctrlName := reflect.TypeOf(module).String()
+	// 检查 ctrlName 是否以 * 开头，如果是则去掉 * 号
+	if len(ctrlName) > 0 && ctrlName[0] == '*' {
+		ctrlName = ctrlName[1:]
+	}
+	return ctrlName
+}
 
 // FirstUpper 字符串首字母大写
 func FirstUpper(s string) string {

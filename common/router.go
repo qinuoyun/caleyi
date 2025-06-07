@@ -64,5 +64,8 @@ func InitRouter() *gin.Engine {
 	})
 	//绑定基本路由，访问路径：/User/List
 	ci.Bind(R)
+	//绑定插件路由
+	BindSoftwareRoutes(R)
+	//返回实例
 	return R
 }

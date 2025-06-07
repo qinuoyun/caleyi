@@ -20,11 +20,17 @@ type DB struct {
 	DBName string
 }
 
+// SetDB 设置DB
 func SetDB(db *gorm.DB) {
 	_DB = db
 }
 
-// RegisterModule
+// D 获取全局数据库连接
+func D() *gorm.DB {
+	return _DB
+}
+
+// RegisterModule 注册系统模型
 func RegisterModule(module interface{}, path string) bool {
 	vbf := reflect.ValueOf(module)
 	//非模型或无方法则直接返回
@@ -32,19 +38,10 @@ func RegisterModule(module interface{}, path string) bool {
 		return false
 	}
 	//获取模型名称，并且去除*号的设置
-	cleanedName := removeStarFromTypeName(module)
+	cleanedName := RemoveStarFromTypeName(module)
 	//存入Map列表
 	modules[cleanedName] = module
 	return true
-}
-
-func removeStarFromTypeName(module interface{}) string {
-	ctrlName := reflect.TypeOf(module).String()
-	// 检查 ctrlName 是否以 * 开头，如果是则去掉 * 号
-	if len(ctrlName) > 0 && ctrlName[0] == '*' {
-		ctrlName = ctrlName[1:]
-	}
-	return ctrlName
 }
 
 // GetModules 用于获取所有已注册的 modules

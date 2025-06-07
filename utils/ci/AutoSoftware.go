@@ -1,0 +1,130 @@
+package ci
+
+import (
+	"fmt"
+	"reflect"
+	"regexp"
+)
+
+var (
+	softwareApp         string
+	softwareControllers map[string]interface{}
+	softwareModules     map[string]interface{}
+	softwareServices    map[string]interface{}
+)
+
+func SoftwareInit() {
+	softwareApp = ""
+	softwareControllers = make(map[string]interface{})
+	softwareModules = make(map[string]interface{})
+	softwareServices = make(map[string]interface{})
+}
+
+// GetControllerPrefixRegex 使用正则表达式从路径中提取"controllers"前的元素
+// 支持多种路径格式，包括：
+// - github.com/qinuoyun/shop/controllers/admin
+// - /path/to/project/controllers/api
+// - shop/controllers/...
+func GetControllerPrefixRegex(path string) (string, error) {
+	// 正则表达式说明：
+	// ([^/]+)    捕获最后一个路径元素（非斜杠字符）
+	// /controllers  匹配/controllers文本
+	// ($|/)     确保controllers后是路径结尾或另一个斜杠
+	re := regexp.MustCompile(`([^/]+)/controllers($|/)`)
+
+	matches := re.FindStringSubmatch(path)
+	if len(matches) < 2 {
+		return "", fmt.Errorf("未找到符合模式的内容: %s", path)
+	}
+
+	return matches[1], nil
+}
+
+// BinController 绑定控制器
+func BinController(controller interface{}, PkgPathStr string) bool {
+	// 检查 PkgPathStr 是否已存在
+	if _, exists := softwareControllers[PkgPathStr]; exists {
+		fmt.Printf("警告: 路径 %s 已存在，跳过绑定\n", PkgPathStr)
+		return false
+	}
+
+	vbf := reflect.ValueOf(controller)
+	// 非模型或无方法则直接返回
+	if vbf.NumMethod() == 0 {
+		return false
+	}
+
+	projectName, err := GetControllerPrefixRegex(PkgPathStr)
+	if err != nil {
+		fmt.Println("错误:", err)
+		return false
+	}
+
+	softwareApp = projectName
+	//fmt.Printf("获得项目名称[%v]获取相应路径: %v\n", projectName, PkgPathStr)
+
+	// 存入 Map 列表
+	softwareControllers[PkgPathStr] = controller
+	return true
+}
+
+// SoftwareName 获取软件名称
+func SoftwareName(table string) string {
+	return fmt.Sprintf("ci_"+softwareApp+"_%s", table)
+}
+
+// BinModule 绑定模型
+func BinModule(module interface{}) bool {
+	vbf := reflect.ValueOf(module)
+	// 非模型或无方法则直接返回
+	if vbf.NumMethod() == 0 {
+		return false
+	}
+	// 获取模型名称，并且去除 * 号的设置
+	cleanedName := RemoveStarFromTypeName(module)
+	// fmt.Printf("获得模型的路径%s", cleanedName)
+	// 存入 Map 列表
+	softwareModules[cleanedName] = module
+	return true
+}
+
+// BinService 绑定服务
+func BinService(service interface{}) bool {
+	vbf := reflect.ValueOf(service)
+	// 非模型或无方法则直接返回
+	if vbf.NumMethod() == 0 {
+		return false
+	}
+	// 获取模型名称，并且去除 * 号的设置
+	cleanedName := RemoveStarFromTypeName(service)
+	// 存入 Map 列表
+	softwareServices[cleanedName] = service
+	return true
+}
+
+// GetControllersList 获取所有已注册的控制器
+func GetControllersList() []interface{} {
+	var controllers []interface{}
+	for _, controller := range softwareControllers {
+		controllers = append(controllers, controller)
+	}
+	return controllers
+}
+
+// GetModulesList 获取所有已注册的模块
+func GetModulesList() []interface{} {
+	var modules []interface{}
+	for _, module := range softwareModules {
+		modules = append(modules, module)
+	}
+	return modules
+}
+
+// GetServicesList 获取所有已注册的服务
+func GetServicesList() []interface{} {
+	var services []interface{}
+	for _, service := range softwareServices {
+		services = append(services, service)
+	}
+	return services
+}

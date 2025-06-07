@@ -3,10 +3,10 @@ module github.com/qinuoyun/caleyi
 go 1.23.4
 
 require (
-	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/gin-contrib/cors v1.7.5
 	github.com/gin-gonic/gin v1.10.1
 	github.com/go-playground/validator/v10 v10.26.0
+	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/pkg/errors v0.9.1
 	gopkg.in/ini.v1 v1.67.0
 	gorm.io/driver/mysql v1.5.7

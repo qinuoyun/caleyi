@@ -21,7 +21,7 @@ func RegisterServer(module interface{}) bool {
 		return false
 	}
 	//获取模型名称，并且去除*号的设置
-	cleanedName := removeStarFromTypeName(module)
+	cleanedName := RemoveStarFromTypeName(module)
 
 	//fmt.Printf("[%s]这里是执行了RegisterServer 注册服务\n", cleanedName)
 	//存入Map列表

@@ -1,49 +1,54 @@
 package middleware
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/qinuoyun/caleyi/utils/ci"
 )
 
-// UserClaims 用户信息类，作为生成token的参数
+// UserClaims 用户信息类，作为生成token的声明
 type UserClaims struct {
 	ID         int64  `json:"id"`
-	AccountId  int64  `json:"accountId"`  //A端主账号id
-	BusinessID int64  `json:"businessID"` //B端主账号id
-	Openid     string `json:"openid"`     //微信openid
+	AccountId  int64  `json:"accountId"`  // A端主账号id
+	BusinessID int64  `json:"businessID"` // B端主账号id
+	Openid     string `json:"openid"`     // 微信openid
 	Name       string `json:"name"`
 	Username   string `json:"username"`
-	//jwt-go提供的标准claim
-	jwt.StandardClaims
+}
+
+// CustomClaims 自定义声明结构体，嵌入标准声明
+type CustomClaims struct {
+	UserClaims
+	jwt.RegisteredClaims // 包含标准声明（过期时间、签发时间等）
 }
 
 var (
-	//自定义的token秘钥
+	// 自定义的token秘钥
 	secret = []byte("16849841325189456f489")
-	// effectTime = 2 * time.Minute //两分钟
+	// EffectTime token有效时间（通过配置加载）
+	EffectTime time.Duration
 )
 
-// EffectTime 加载配置
-// token有效时间（纳秒）
-var EffectTime = time.Duration(getJwtInt()) * time.Minute //分钟单位
+// 初始化函数，加载配置
+func init() {
+	EffectTime = time.Duration(getJwtInt()) * time.Minute // 分钟单位
+}
 
-// 写个返回int64-默认2个小时
+// getJwtInt 从配置获取JWT过期时间（默认2小时）
 func getJwtInt() int64 {
-	//加载配置
-
+	// 加载配置
 	num := "72000"
 	intNum, err := strconv.ParseInt(num, 10, 64)
 	if err != nil {
-		return 2 * 60 //默认2个小时
-	} else {
-		return intNum
+		return 2 * 60 // 默认2个小时（分钟）
 	}
+	return intNum
 }
 
 // TokenOutTime 返回超时时间
@@ -52,37 +57,42 @@ func TokenOutTime(claims *UserClaims) int64 {
 }
 
 // GenerateToken 生成token
-func GenerateToken(claims *UserClaims) interface{} {
-	//设置token有效期，也可不设置有效期，采用redis的方式
-	//   1)将token存储在redis中，设置过期时间，token如没过期，则自动刷新redis过期时间，
-	//   2)通过这种方式，可以很方便的为token续期，而且也可以实现长时间不登录的话，强制登录
-	//本例只是简单采用 设置token有效期的方式，只是提供了刷新token的方法，并没有做续期处理的逻辑
-	claims.ExpiresAt = time.Now().Add(EffectTime).Unix()
-	//生成token
-	sign, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
-	if err != nil {
-		//这里因为项目接入了统一异常处理，所以使用panic并不会使程序终止，如不接入，可使用原始方式处理错误
-		//接入统一异常可参考 https://blog.csdn.net/u014155085/article/details/106733391
-		panic(err)
+func GenerateToken(claims *UserClaims) (string, error) {
+	// 设置自定义声明和标准声明
+	customClaims := CustomClaims{
+		UserClaims: *claims,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(EffectTime)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   strconv.FormatInt(claims.ID, 10),
+		},
 	}
-	return sign
+
+	// 生成token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, customClaims)
+	signedToken, err := token.SignedString(secret)
+	if err != nil {
+		return "", err
+	}
+	return signedToken, nil
 }
 
 // JwtVerify 验证token
 func JwtVerify(c *gin.Context) {
-	//获取白名单列表
+	// 获取白名单列表
 	whitelistItems := ci.C("whitelist.items")
-	//转换列表数据
+	// 转换列表数据
 	whiteList := strings.Split(whitelistItems, ",")
-	if checkWhiteList(whiteList, c.Request.URL.Path) { //不需要token验证-具体路径
+	if checkWhiteList(whiteList, c.Request.URL.Path) { // 不需要token验证的路径
 		return
 	}
+
+	// 从请求头获取token
 	token := c.GetHeader("Authorization")
 	if token == "" {
 		token = c.GetHeader("authorization")
 	}
 	if token == "" {
-		// 以 Json.go 格式返回错误消息
 		c.JSON(401, gin.H{
 			"code": 401,
 			"msg":  "token 不存在",
@@ -90,59 +100,73 @@ func JwtVerify(c *gin.Context) {
 		c.Abort()
 		return
 	}
+
 	// 分割字符串，提取Bearer Token
 	parts := strings.SplitN(token, " ", 2)
 	if !(len(parts) == 2 && parts[0] == "Bearer") {
-		// 以 Json.go 格式返回错误消息
 		c.JSON(401, gin.H{
 			"code": 401,
-			"msg":  "Authorization header format must be Bearer [token]",
+			"msg":  "Authorization header格式必须为 Bearer [token]",
 		})
 		c.Abort()
 		return
 	}
 	token = parts[1]
-	// 验证token，并存储在请求中
-	claims := ParseToken(token)
-	c.Set("user", claims)
-	// 存储 user_id 到 context
-	c.Set("user_id", claims.ID)
+
+	// 验证token并解析声明
+	claims, err := ParseToken(token)
+	if err != nil {
+		c.JSON(401, gin.H{
+			"code": 401,
+			"msg":  "token无效: " + err.Error(),
+		})
+		c.Abort()
+		return
+	}
+
+	// 将用户信息存储在请求上下文中
+	c.Set("user", claims.UserClaims)
+	c.Set("user_id", claims.UserClaims.ID)
 }
 
 // ParseToken 解析Token
-func ParseToken(tokenString string) *UserClaims {
-	//解析token
-	token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
+func ParseToken(tokenString string) (*CustomClaims, error) {
+	// 定义声明结构体
+	claims := &CustomClaims{}
+
+	// 解析token
+	_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		// 验证签名算法
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return secret, nil
 	})
+
 	if err != nil {
-		panic(err)
+		// 区分不同错误类型
+		if err == jwt.ErrSignatureInvalid {
+			return nil, fmt.Errorf("签名无效")
+		}
+		return nil, err
 	}
-	claims, ok := token.Claims.(*UserClaims)
-	if !ok {
-		panic("The token is invalid")
-	}
-	return claims
+
+	return claims, nil
 }
 
 // Refresh 更新token
-func Refresh(tokenString string) interface{} {
-	jwt.TimeFunc = func() time.Time {
-		return time.Unix(0, 0)
-	}
-	token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
-		return secret, nil
-	})
+func Refresh(tokenString string) (string, error) {
+	// 解析旧token
+	claims, err := ParseToken(tokenString)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
-	claims, ok := token.Claims.(*UserClaims)
-	if !ok {
-		panic("The token is invalid")
-	}
-	jwt.TimeFunc = time.Now
-	claims.StandardClaims.ExpiresAt = time.Now().Add(EffectTime).Unix()
-	return GenerateToken(claims)
+
+	// 更新过期时间
+	claims.RegisteredClaims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(EffectTime))
+
+	// 生成新token
+	return GenerateToken(&claims.UserClaims)
 }
 
 // 检查白名单

@@ -42,29 +42,9 @@ func Register(controller interface{}, PkgPathStr string) bool {
 
 	//重置URL地址链接
 	rootPkg = basePkg + rootPkg
+	//获取模型名称
+	module := GetControllerModuleName(controller)
 
-	//fmt.Println("查看根[rootPkg]=", rootPkg)
-	ctrlName := reflect.TypeOf(controller).String()
-	// 检查是否以 "Controller" 结尾
-	if strings.HasSuffix(ctrlName, "Controller") {
-		// 截取字符串
-		ctrlName = strings.TrimSuffix(ctrlName, "Controller")
-		// 如果类型名包含包名，还需要去除包名部分
-		if dotIndex := strings.LastIndex(ctrlName, "."); dotIndex != -1 {
-			ctrlName = ctrlName[dotIndex+1:]
-		}
-	}
-
-	module := ctrlName
-	if strings.Contains(ctrlName, ".") {
-		module = ctrlName[strings.Index(ctrlName, ".")+1:]
-	}
-	//fmt.Println("module=", module)
-	if module == "Index" { //去index
-		module = "/"
-	} else {
-		module = "/" + strings.ToLower(module) + "/"
-	}
 	v := reflect.ValueOf(controller)
 	// fmt.Println("遍历方法:")
 	// fmt.Println(ctrlName)
