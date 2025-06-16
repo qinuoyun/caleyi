@@ -2,10 +2,15 @@ package ci
 
 import (
 	"fmt"
-	"github.com/go-playground/validator/v10"
+	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 )
 
 // GetControllerModuleName 从控制器对象中提取模块名称
@@ -111,4 +116,61 @@ func I(str ...string) string {
 		conditions = append(conditions, condition)
 	}
 	return strings.Join(conditions, " AND ")
+}
+
+// APIResponse 定义标准API响应结构
+type APIResponse struct {
+	Code int         `json:"code"`
+	Msg  string      `json:"msg"`
+	Data interface{} `json:"data"`
+}
+
+// Success 发送成功响应
+func Success(c *gin.Context, data interface{}) {
+	c.JSON(http.StatusOK, APIResponse{
+		Code: 0,
+		Msg:  "成功",
+		Data: data,
+	})
+}
+
+// Error 发送错误响应
+func Error(c *gin.Context, code int, msg string) {
+	c.JSON(http.StatusOK, APIResponse{
+		Code: code,
+		Msg:  msg,
+		Data: nil,
+	})
+	return
+}
+
+// Custom 自定义响应内容
+func Custom(c *gin.Context, code int, msg string, data interface{}) {
+	c.JSON(http.StatusOK, APIResponse{
+		Code: code,
+		Msg:  msg,
+		Data: data,
+	})
+	return
+}
+
+// GetConfigPath 根据环境返回配置文件路径
+func GetConfigPath(filename string) string {
+	// 检查是否为开发环境
+	isDev := os.Getenv("APP_ENV") == "development"
+
+	if isDev {
+		// 开发环境：使用相对路径
+		return filename
+	}
+
+	// 生产环境：使用可执行文件所在目录
+	exePath, err := os.Executable()
+	if err != nil {
+		//fmt.Printf("获取可执行文件路径失败: %v\n", err)
+		return filename // 默认回退路径
+	}
+
+	exeDir := filepath.Dir(exePath)
+	return filepath.Join(exeDir, filename)
 }

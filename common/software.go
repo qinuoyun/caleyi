@@ -2,10 +2,11 @@ package common
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"reflect"
 	"strings"
 	"unicode"
+
+	"github.com/gin-gonic/gin"
 )
 
 // Controller 定义控制器模块接口
@@ -44,8 +45,12 @@ var ModulesPool = make(map[string][]Module)
 func ConvertToControllers(controllers []interface{}, AppName string) []Controller {
 	var result []Controller
 	for _, c := range controllers {
-		//fmt.Printf("ConvertToControllers 查看路径名称%v和APP%v\n", c, AppName)
-		registerControllerRoutes(c, AppName)
+		if Controller, ok := c.(Controller); ok {
+			result = append(result, Controller)
+			registerControllerRoutes(c, AppName)
+		} else {
+			fmt.Printf("  转换失败: %T\n", c) // 新增调试日志
+		}
 	}
 	return result
 }
@@ -56,7 +61,7 @@ func ConvertToModules(modules []interface{}, AppName string) []Module {
 	for _, m := range modules {
 		if module, ok := m.(Module); ok {
 			result = append(result, module)
-			fmt.Printf("  成功转换模块: %T\n", module) // 新增调试日志
+			//fmt.Printf("  成功转换模块: %T\n", module) // 新增调试日志
 		} else {
 			fmt.Printf("  转换失败: %T\n", m) // 新增调试日志
 		}
@@ -78,7 +83,7 @@ func ConvertToServices(services []interface{}) []Service {
 
 // BindSoftwareRoutes Bind 绑定路由 m是方法GET POST等
 func BindSoftwareRoutes(e *gin.Engine) {
-	//fmt.Printf("查看路径名称%v\n", Routes)
+	//fmt.Printf("====我是插件路由-查看路径名称%v\n", Routes)
 	for _, route := range Routes {
 		//fmt.Printf("查看路径名称%v\n", route.path)
 		//只允许GET或者POST
@@ -90,7 +95,7 @@ func BindSoftwareRoutes(e *gin.Engine) {
 func matchPath(path string, route Route) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		fields := strings.Split(path, "/")
-		fmt.Println("00000-fields,len(fields)=", fields, len(fields))
+		//fmt.Println("00000-fields,len(fields)=", fields, len(fields))
 		if len(fields) < 4 {
 			return
 		}

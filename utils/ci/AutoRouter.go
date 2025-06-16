@@ -4,7 +4,6 @@ package ci
 * 自动路由工具
  */
 import (
-	"fmt"
 	"reflect"
 	"strings"
 
@@ -92,7 +91,7 @@ func Bind(e *gin.Engine) {
 func match(path string, route Route) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		fields := strings.Split(path, "/")
-		fmt.Println("00000-fields,len(fields)=", fields, len(fields))
+		//fmt.Println("00000-fields,len(fields)=", fields, len(fields))
 		if len(fields) < 3 {
 			return
 		}

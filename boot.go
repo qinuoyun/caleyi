@@ -9,14 +9,14 @@ import (
 
 func BootStart() {
 
-	//加载路由
-	r := common.InitRouter()
-
 	//初始化模型
 	common.InitModule()
 
 	//初始化服务
 	common.InitServer()
+
+	//加载路由
+	r := common.InitRouter()
 
 	routes := ""
 	for _, route := range r.Routes() {

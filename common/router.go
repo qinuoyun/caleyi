@@ -4,13 +4,14 @@ package common
 //这里路由-由构架是添加-开发者仅在指定工程目录下controller.go文件添加宝即可
 import (
 	"fmt"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/qinuoyun/caleyi/middleware"
 	"github.com/qinuoyun/caleyi/utils/ci"
-	"os"
-	"strings"
-	"time"
 )
 
 func InitRouter() *gin.Engine {
@@ -56,12 +57,26 @@ func InitRouter() *gin.Engine {
 	//4.验证token
 	R.Use(middleware.JwtVerify)
 
-	//5.找不到路由
+	//5.处理租户问题
+	R.Use(middleware.TenantVerify)
+
+	//6.找不到路由
 	R.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		method := c.Request.Method
 		c.JSON(404, gin.H{"code": 404, "message": "您" + method + "请求地址：" + path + "不存在！"})
 	})
+
+	// 获取所自定义中间件
+	middlewaresMap := ci.GetMiddlewares()
+
+	// 循环遍历并判断是否有 index 方法，有则绑定
+	for _, value := range middlewaresMap {
+		if indexMethod, ok := value.(interface{ Index() gin.HandlerFunc }); ok {
+			R.Use(indexMethod.Index())
+		}
+	}
+
 	//绑定基本路由，访问路径：/User/List
 	ci.Bind(R)
 	//绑定插件路由

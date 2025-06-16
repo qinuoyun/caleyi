@@ -13,6 +13,11 @@ var (
 	softwareServices    map[string]interface{}
 )
 
+// 在包初始化时调用 SoftwareInit
+func init() {
+	SoftwareInit()
+}
+
 func SoftwareInit() {
 	softwareApp = ""
 	softwareControllers = make(map[string]interface{})
@@ -40,8 +45,14 @@ func GetControllerPrefixRegex(path string) (string, error) {
 	return matches[1], nil
 }
 
+// SetSoftwareApp 设置软件名称
+func SetSoftwareApp(appName string) {
+	softwareApp = appName
+}
+
 // BinController 绑定控制器
 func BinController(controller interface{}, PkgPathStr string) bool {
+	//fmt.Printf("绑定控制器: %v\n", PkgPathStr)
 	// 检查 PkgPathStr 是否已存在
 	if _, exists := softwareControllers[PkgPathStr]; exists {
 		fmt.Printf("警告: 路径 %s 已存在，跳过绑定\n", PkgPathStr)
