@@ -57,8 +57,8 @@ func InitModule() {
 	}
 
 	//获得所有插件模板
-	for appName, modules := range ModulesPool {
-		fmt.Printf("当前AppName: %s\n", appName)
+	for _, modules := range ModulesPool {
+		//fmt.Printf("当前AppName: %s\n", appName)
 		for _, module := range modules {
 			// 执行迁移或查询
 			if err := _DB.AutoMigrate(module); err != nil {

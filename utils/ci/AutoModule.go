@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"reflect"
 	"strings"
@@ -28,6 +29,27 @@ func SetDB(db *gorm.DB) {
 // D 获取全局数据库连接
 func D() *gorm.DB {
 	return _DB
+}
+
+// GetDB 从 Gin 上下文中获取 GORM 数据库实例
+// 如果获取失败，会直接通过 c.JSON 返回错误信息并终止请求处理
+// 如果获取成功，返回 GORM 数据库实例
+func GetDB(c *gin.Context) *gorm.DB {
+	dbValue, exists := c.Get("db")
+	if !exists {
+		c.JSON(500, gin.H{"error": "Database instance not found"})
+		c.Abort()
+		return nil
+	}
+
+	gormDB, ok := dbValue.(*gorm.DB)
+	if !ok {
+		c.JSON(500, gin.H{"error": "Database instance type error"})
+		c.Abort()
+		return nil
+	}
+
+	return gormDB
 }
 
 // RegisterModule 注册系统模型

@@ -132,6 +132,8 @@ func Success(c *gin.Context, data interface{}) {
 		Msg:  "成功",
 		Data: data,
 	})
+	// 中断当前请求的后续处理
+	c.Abort()
 }
 
 // Error 发送错误响应
@@ -141,6 +143,8 @@ func Error(c *gin.Context, code int, msg string) {
 		Msg:  msg,
 		Data: nil,
 	})
+	// 中断当前请求的后续处理
+	c.Abort()
 	return
 }
 
@@ -151,6 +155,8 @@ func Custom(c *gin.Context, code int, msg string, data interface{}) {
 		Msg:  msg,
 		Data: data,
 	})
+	// 中断当前请求的后续处理
+	c.Abort()
 	return
 }
 

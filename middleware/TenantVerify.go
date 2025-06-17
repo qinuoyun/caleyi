@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/qinuoyun/caleyi/utils/ci"
@@ -60,9 +61,17 @@ func TenantVerify(c *gin.Context) {
 			c.AbortWithStatusJSON(400, gin.H{"error": "未提供 tenant_id，请通过请求头或 GET 参数传递"})
 			return
 		}
-		// 可以在这里将 tenantID 存储到上下文中，供后续处理使用
-		c.Set("tenant_id", tenantID)
 
+		// 获取 GORM 数据库实例
+		db := ci.D()
+
+		// 将 tenant_id 放入 GORM 事务上下文中
+		ctx := context.WithValue(c.Request.Context(), "tenant_id", tenantID)
+		db = db.WithContext(ctx)
+
+		// 可以在这里将 tenantID 存储到上下文中，供后续处理使用
+		c.Set("db", db)
+		c.Set("tenant_id", tenantID)
 		c.Next()
 	} else {
 		c.Next()
