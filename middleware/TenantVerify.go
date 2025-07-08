@@ -36,7 +36,7 @@ func TenantVerify(c *gin.Context) {
 
 		// 分割路径并检查段数
 		segments := strings.Split(path, "/")
-		if len(segments) != 5 {
+		if len(segments) < 5 {
 			c.Next()
 			return
 		}
@@ -55,10 +55,19 @@ func TenantVerify(c *gin.Context) {
 			// 若请求头中没有，尝试从 GET 参数获取
 			tenantID = c.Query("tenant_id")
 		}
+		if tenantID == "" {
+			// 若 GET 参数中没有，尝试从 POST 的 JSON 数据获取
+			var data map[string]interface{}
+			if err := c.BindJSON(&data); err == nil {
+				if id, ok := data["tenant_id"].(string); ok {
+					tenantID = id
+				}
+			}
+		}
 
 		// 检查是否获取到 tenant_id
 		if tenantID == "" {
-			c.AbortWithStatusJSON(400, gin.H{"error": "未提供 tenant_id，请通过请求头或 GET 参数传递"})
+			c.AbortWithStatusJSON(400, gin.H{"error": "未提供 tenant_id，请通过请求头或 GET/POST 参数传递"})
 			return
 		}
 

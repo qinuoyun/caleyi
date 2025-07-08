@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"strings"
 )
 
 var (
@@ -52,10 +53,23 @@ func SetSoftwareApp(appName string) {
 
 // BinController 绑定控制器
 func BinController(controller interface{}, PkgPathStr string) bool {
-	//fmt.Printf("绑定控制器: %v\n", PkgPathStr)
+	v := reflect.ValueOf(controller)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem() // 获取指针指向的实际对象
+	}
+
+	// 获取控制器类型名称（包含包路径）
+	ctrlTypeName := v.Type().String()
+
+	module := extractModuleName(ctrlTypeName)
+
+	fullPath := PkgPathStr + module
+
+	//fmt.Printf("AAAA***============查看完整路径%v\n", fullPath)
+
 	// 检查 PkgPathStr 是否已存在
-	if _, exists := softwareControllers[PkgPathStr]; exists {
-		fmt.Printf("警告: 路径 %s 已存在，跳过绑定\n", PkgPathStr)
+	if _, exists := softwareControllers[fullPath]; exists {
+		fmt.Printf("警告: 路径 %s 已存在，跳过绑定\n", fullPath)
 		return false
 	}
 
@@ -65,17 +79,17 @@ func BinController(controller interface{}, PkgPathStr string) bool {
 		return false
 	}
 
-	projectName, err := GetControllerPrefixRegex(PkgPathStr)
+	projectName, err := GetControllerPrefixRegex(fullPath)
 	if err != nil {
 		fmt.Println("错误:", err)
 		return false
 	}
 
 	softwareApp = projectName
-	//fmt.Printf("获得项目名称[%v]获取相应路径: %v\n", projectName, PkgPathStr)
+	//fmt.Printf("获得项目名称[%v]获取相应路径: %v\n", projectName, fullPath)
 
 	// 存入 Map 列表
-	softwareControllers[PkgPathStr] = controller
+	softwareControllers[fullPath] = controller
 	return true
 }
 
@@ -114,12 +128,9 @@ func BinService(service interface{}) bool {
 }
 
 // GetControllersList 获取所有已注册的控制器
-func GetControllersList() []interface{} {
-	var controllers []interface{}
-	for _, controller := range softwareControllers {
-		controllers = append(controllers, controller)
-	}
-	return controllers
+func GetControllersList() map[string]interface{} {
+	// 直接返回 softwareControllers
+	return softwareControllers
 }
 
 // GetModulesList 获取所有已注册的模块
@@ -138,4 +149,35 @@ func GetServicesList() []interface{} {
 		services = append(services, service)
 	}
 	return services
+}
+
+func extractGroupName(fullName string) string {
+	// 查找第一个点号的位置
+	dotIndex := strings.Index(fullName, ".")
+	if dotIndex == -1 {
+		// 如果没有点号，返回整个字符串（可能是不包含包名的简单名称）
+		return fullName
+	}
+
+	// 返回点号之前的部分
+	return fullName[:dotIndex]
+}
+
+// 从控制器类型名称中提取模块名
+func extractModuleName(typeName string) string {
+	// 移除包路径，只保留类型名
+	if dotIndex := strings.LastIndex(typeName, "."); dotIndex != -1 {
+		typeName = typeName[dotIndex+1:]
+	}
+
+	// 移除"Controller"后缀
+	typeName = strings.TrimSuffix(typeName, "Controller")
+
+	// 特殊处理：Index控制器映射到根路径
+	if typeName == "Index" {
+		return "/"
+	}
+
+	// 转换为小写并添加斜杠
+	return "/" + strings.ToLower(typeName) + "/"
 }

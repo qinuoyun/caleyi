@@ -3,6 +3,7 @@ package common
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -42,12 +43,13 @@ var Routes []Route
 var ModulesPool = make(map[string][]Module)
 
 // ConvertToControllers 将通用接口类型转换为 Controller 类型
-func ConvertToControllers(controllers []interface{}, AppName string) []Controller {
+func ConvertToControllers(controllers map[string]interface{}, AppName string) []Controller {
 	var result []Controller
-	for _, c := range controllers {
+	for route, c := range controllers {
 		if Controller, ok := c.(Controller); ok {
+			//fmt.Printf("  成功转换控制器: %T\n", c) // 新增调试日志
 			result = append(result, Controller)
-			registerControllerRoutes(c, AppName)
+			registerControllerRoutes(c, route, AppName)
 		} else {
 			fmt.Printf("  转换失败: %T\n", c) // 新增调试日志
 		}
@@ -107,19 +109,26 @@ func matchPath(path string, route Route) gin.HandlerFunc {
 	}
 }
 
+// GetAdminMerchantPathByRegex 通过正则表达式匹配目标子串
+func GetAdminMerchantPathByRegex(input string) string {
+	// 编译正则表达式：匹配 controllers/ 后的所有字符
+	reg := regexp.MustCompile(`controllers/(.+)`)
+	// 查找匹配项
+	matchResult := reg.FindStringSubmatch(input)
+	if len(matchResult) >= 2 {
+		return matchResult[1]
+	}
+	return "" // 无匹配时返回空
+}
+
 // 从控制器对象自动注册路由
-func registerControllerRoutes(controller interface{}, prefix string) {
+func registerControllerRoutes(controller interface{}, route string, prefix string) {
 	v := reflect.ValueOf(controller)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem() // 获取指针指向的实际对象
 	}
 
-	// 获取控制器类型名称（用于生成路由前缀）
-	ctrlTypeName := v.Type().String()
-
-	group := extractGroupName(ctrlTypeName)
-
-	module := extractModuleName(ctrlTypeName)
+	fullPath := GetAdminMerchantPathByRegex(route)
 
 	// 遍历控制器的所有方法
 	for i := 0; i < v.NumMethod(); i++ {
@@ -130,10 +139,8 @@ func registerControllerRoutes(controller interface{}, prefix string) {
 		if !isPublicMethod(methodName) {
 			continue
 		}
-
 		// 生成路由路径：根路径 + 模块名 + 方法名（首字母小写）
-		path := "/api/" + prefix + "/" + group + module + firstLower(methodName)
-
+		path := "/api/" + prefix + "/" + fullPath + firstLower(methodName)
 		//fmt.Printf("============查看路径名称%v\n", path)
 
 		// 根据方法名前缀自动推断HTTP方法
@@ -145,37 +152,6 @@ func registerControllerRoutes(controller interface{}, prefix string) {
 		// 注册主路由
 		registerRoute(path, method, paramTypes, httpMethod)
 	}
-}
-
-func extractGroupName(fullName string) string {
-	// 查找第一个点号的位置
-	dotIndex := strings.Index(fullName, ".")
-	if dotIndex == -1 {
-		// 如果没有点号，返回整个字符串（可能是不包含包名的简单名称）
-		return fullName
-	}
-
-	// 返回点号之前的部分
-	return fullName[:dotIndex]
-}
-
-// 从控制器类型名称中提取模块名
-func extractModuleName(typeName string) string {
-	// 移除包路径，只保留类型名
-	if dotIndex := strings.LastIndex(typeName, "."); dotIndex != -1 {
-		typeName = typeName[dotIndex+1:]
-	}
-
-	// 移除"Controller"后缀
-	typeName = strings.TrimSuffix(typeName, "Controller")
-
-	// 特殊处理：Index控制器映射到根路径
-	if typeName == "Index" {
-		return "/"
-	}
-
-	// 转换为小写并添加斜杠
-	return "/" + strings.ToLower(typeName) + "/"
 }
 
 // 判断方法是否为公共方法（首字母大写）
@@ -219,9 +195,19 @@ func registerRoute(path string, method reflect.Value, params []reflect.Type, htt
 }
 
 // 将字符串首字母转为小写
+// 将驼峰命名的字符串转换为小写并用斜杠分隔
 func firstLower(s string) string {
 	if len(s) == 0 {
 		return s
 	}
-	return strings.ToLower(s[:1]) + s[1:]
+
+	// 处理首字母小写
+	result := strings.ToLower(s[:1]) + s[1:]
+
+	// 使用正则表达式在大写字母前插入斜杠（但不处理第一个字符）
+	re := regexp.MustCompile(`([a-z0-9])([A-Z])`)
+	result = re.ReplaceAllString(result, "$1/$2")
+
+	// 将所有字符转换为小写
+	return strings.ToLower(result)
 }

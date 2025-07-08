@@ -136,6 +136,16 @@ func Success(c *gin.Context, data interface{}) {
 	c.Abort()
 }
 
+// Message 发送消息响应
+func Message(c *gin.Context, Msg string) {
+	c.JSON(http.StatusOK, APIResponse{
+		Code: 0,
+		Msg:  Msg,
+	})
+	// 中断当前请求的后续处理
+	c.Abort()
+}
+
 // Error 发送错误响应
 func Error(c *gin.Context, code int, msg string) {
 	c.JSON(http.StatusOK, APIResponse{

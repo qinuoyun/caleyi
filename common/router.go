@@ -22,6 +22,9 @@ func InitRouter() *gin.Engine {
 		return nil
 	}
 	//访问公共目录
+	R.Static("/static", "./static")
+
+	//访问公共目录
 	R.Static("/public", "./public")
 
 	//访问公共目录

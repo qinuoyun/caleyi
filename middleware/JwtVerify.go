@@ -15,10 +15,11 @@ import (
 // UserClaims 用户信息类，作为生成token的声明
 type UserClaims struct {
 	ID         int64  `json:"id"`
-	AccountId  int64  `json:"accountId"`  // A端主账号id
-	BusinessID int64  `json:"businessID"` // B端主账号id
-	Openid     string `json:"openid"`     // 微信openid
-	Name       string `json:"name"`
+	AccountId  int64  `json:"account_id"`  // A端主账号id
+	BusinessID int64  `json:"business_id"` // B端主账号id
+	ClientID   int64  `json:"client_id"`   // C端主账号id
+	Openid     string `json:"openid"`      // 微信openid
+	Module     string `json:"module"`      // 账号模型是前端 还是 商户 还是 后端
 	Username   string `json:"username"`
 }
 
@@ -83,6 +84,11 @@ func JwtVerify(c *gin.Context) {
 	whitelistItems := ci.C("whitelist.items")
 	// 转换列表数据
 	whiteList := strings.Split(whitelistItems, ",")
+
+	//fmt.Println(whiteList)
+	//fmt.Println("==PATH地址", c.Request.URL.Path)
+	//fmt.Println("==校验结果", checkWhiteList(whiteList, c.Request.URL.Path))
+
 	if checkWhiteList(whiteList, c.Request.URL.Path) { // 不需要token验证的路径
 		return
 	}
@@ -126,7 +132,15 @@ func JwtVerify(c *gin.Context) {
 
 	// 将用户信息存储在请求上下文中
 	c.Set("user", claims.UserClaims)
-	c.Set("user_id", claims.UserClaims.ID)
+
+	c.Set("uid", claims.UserClaims.ID)
+
+	// 判断 claims.UserClaims.module 是否为空
+	if claims.UserClaims.Module == "" {
+		c.Set("user_module", "user") // 不存在则设置为 "user"
+	} else {
+		c.Set("user_module", claims.UserClaims.Module) // 存在则使用原值
+	}
 }
 
 // ParseToken 解析Token
