@@ -2,9 +2,10 @@ package caleyi
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/qinuoyun/caleyi/common"
 	"github.com/qinuoyun/caleyi/utils/ci"
-	"strings"
 )
 
 func BootStart() {
@@ -30,7 +31,7 @@ func BootStart() {
 		return
 	}
 
-	err = r.Run(":9097")
+	err = r.Run(":" + ci.C("app.app_port"))
 	if err != nil {
 		return
 	}
