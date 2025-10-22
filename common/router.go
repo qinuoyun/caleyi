@@ -30,6 +30,9 @@ func InitRouter() *gin.Engine {
 	//访问公共目录
 	R.Static("/uploads", "./uploads")
 
+	//访问公共目录
+	R.Static("/web", "./views/web")
+
 	// 处理静态文件和默认页面
 	R.GET("/admin/*any", func(c *gin.Context) {
 		filePath := c.Param("any")
@@ -46,7 +49,14 @@ func InitRouter() *gin.Engine {
 
 	//访问域名根目录重定向
 	R.GET("/", func(c *gin.Context) {
-		c.JSON(200, gin.H{"code": 200, "message": "欢迎使用卡莱易框架"})
+		// 检查 views/web/index.html 是否存在
+		if _, err := os.Stat("views/web/index.html"); err == nil {
+			// 文件存在，渲染 HTML
+			c.File("views/web/index.html")
+		} else {
+			// 文件不存在，返回 JSON
+			c.JSON(200, gin.H{"code": 200, "message": "欢迎使用卡莱易框架"})
+		}
 	})
 
 	R.Use(cors.New(cors.Config{
