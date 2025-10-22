@@ -85,9 +85,9 @@ func JwtVerify(c *gin.Context) {
 	// 转换列表数据
 	whiteList := strings.Split(whitelistItems, ",")
 
-	fmt.Println(whiteList)
-	fmt.Println("==PATH地址", c.Request.URL.Path)
-	fmt.Println("==校验结果", checkWhiteList(whiteList, c.Request.URL.Path))
+	//fmt.Println(whiteList)
+	//fmt.Println("==PATH地址", c.Request.URL.Path)
+	//fmt.Println("==校验结果", checkWhiteList(whiteList, c.Request.URL.Path))
 
 	if checkWhiteList(whiteList, c.Request.URL.Path) { // 不需要token验证的路径
 		return
@@ -129,6 +129,8 @@ func JwtVerify(c *gin.Context) {
 		c.Abort()
 		return
 	}
+
+	fmt.Println("存储的用户UID", claims.UserClaims.ID)
 
 	// 将用户信息存储在请求上下文中
 	c.Set("user", claims.UserClaims)
