@@ -47,6 +47,20 @@ func InitRouter() *gin.Engine {
 		}
 	})
 
+	// 处理静态文件和默认页面
+	R.GET("/merchant/*any", func(c *gin.Context) {
+		filePath := c.Param("any")
+		if filePath == "" || strings.HasSuffix(filePath, "/") {
+			filePath = "index.html"
+		}
+		fullPath := fmt.Sprintf("views/merchant/%s", filePath)
+		if _, err := os.Stat(fullPath); err == nil {
+			c.File(fullPath)
+		} else {
+			c.File("views/merchant/index.html")
+		}
+	})
+
 	//访问域名根目录重定向
 	R.GET("/", func(c *gin.Context) {
 		// 检查 views/web/index.html 是否存在
