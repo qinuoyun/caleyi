@@ -14,7 +14,8 @@ import (
 )
 
 // HasHandleBeforeByReflect
-// 终极优化反射检测函数（确保能找到值/指针接收者方法）
+// 反射检测中间件是否实现了 HandleBefore 方法（必须是导出方法，首字母大写）
+// 支持指针接收者和值接收者两种方式
 func HasHandleBeforeByReflect(obj interface{}) (bool, reflect.Value) {
 	// 1. 处理 nil 实例
 	if obj == nil {
@@ -30,29 +31,59 @@ func HasHandleBeforeByReflect(obj interface{}) (bool, reflect.Value) {
 		return false, reflect.Value{}
 	}
 
-	var method reflect.Value
-	// 3. 分场景强制查找方法（指针 → 值类型，层层兜底）
-	// 场景1：先查找当前实例（指针/值）的方法
-	method = val.MethodByName("handleBefore")
-	if method.IsValid() {
-		goto checkSignature // 找到方法，直接校验签名
+	// 输出详细的类型信息用于调试
+	fmt.Printf("  反射调试：val.Kind()=%v, typ=%v\n", val.Kind(), typ)
+	fmt.Printf("  反射调试：val.NumMethod()=%d\n", val.NumMethod())
+	for i := 0; i < val.NumMethod(); i++ {
+		fmt.Printf("    方法[%d]: %s\n", i, val.Type().Method(i).Name)
 	}
 
-	// 场景2：当前实例未找到，若为指针则取值类型再查找
+	var method reflect.Value
+	// 3. 分场景强制查找方法（指针 → 值类型，层层兜底）
+	// 场景1：先查找当前实例（指针/值）的方法（指针接收者方法）
+	method = val.MethodByName("HandleBefore")
+	if method.IsValid() {
+		fmt.Printf("  ✓ 反射检测：在指针类型上找到 HandleBefore 方法（指针接收者）\n")
+		goto checkSignature // 找到方法，直接校验签名
+	}
+	fmt.Printf("  反射调试：场景1未找到方法\n")
+
+	// 场景2：当前实例未找到，若为指针则取值类型再查找（值接收者方法）
 	if val.Kind() == reflect.Ptr {
 		if val.IsNil() {
 			fmt.Printf("  反射检测：指针实例为 nil，无法取值\n")
 			return false, reflect.Value{}
 		}
 		elemVal := val.Elem()
-		method = elemVal.MethodByName("handleBefore")
+		fmt.Printf("  反射调试：场景2解引用后 elemVal.Kind()=%v, elemVal.NumMethod()=%d\n", elemVal.Kind(), elemVal.NumMethod())
+		for i := 0; i < elemVal.NumMethod(); i++ {
+			fmt.Printf("    值类型方法[%d]: %s\n", i, elemVal.Type().Method(i).Name)
+		}
+		method = elemVal.MethodByName("HandleBefore")
 		if method.IsValid() {
+			fmt.Printf("  ✓ 反射检测：在值类型上找到 HandleBefore 方法（值接收者）\n")
 			goto checkSignature // 找到方法，直接校验签名
 		}
+		fmt.Printf("  反射调试：场景2未找到方法\n")
 	}
 
-	// 场景3：所有场景都未找到方法
-	fmt.Printf("  反射检测：未找到 handleBefore 方法\n")
+	// 场景3：若为值类型，尝试通过类型方法集查找（兼容边界情况）
+	if val.Kind() != reflect.Ptr {
+		ptrVal := reflect.New(typ)
+		fmt.Printf("  反射调试：场景3创建指针包装 ptrVal.NumMethod()=%d\n", ptrVal.NumMethod())
+		method = ptrVal.MethodByName("HandleBefore")
+		if method.IsValid() {
+			fmt.Printf("  ✓ 反射检测：通过指针包装找到 HandleBefore 方法\n")
+			// 注意：此时需要重新绑定实例到原始对象
+			ptrVal.Elem().Set(val)
+			method = ptrVal.MethodByName("HandleBefore")
+			goto checkSignature
+		}
+		fmt.Printf("  反射调试：场景3未找到方法\n")
+	}
+
+	// 场景4：所有场景都未找到方法
+	fmt.Printf("  ✗ 反射检测：未找到 HandleBefore 方法\n")
 	return false, reflect.Value{}
 
 	// 4. 严格校验方法签名
@@ -162,22 +193,22 @@ func InitRouter() *gin.Engine {
 	for i, mw := range middlewareList {
 		fmt.Printf("\n=== 处理中间件（索引：%d，类型：%T）===\n", i, mw)
 
-		// 1. 反射检测是否存在有效 handleBefore 方法
+		// 1. 反射检测是否存在有效 HandleBefore 方法
 		hasBefore, methodVal := HasHandleBeforeByReflect(mw)
 		if !hasBefore {
-			fmt.Printf("  该中间件不存在有效 handleBefore 方法，跳过注册\n")
+			fmt.Printf("  该中间件不存在有效 HandleBefore 方法，跳过注册\n")
 			continue
 		}
 
 		// 2. 捕获当前循环的 methodVal，解决闭包作用域覆盖问题
 		validMethod := methodVal
-		fmt.Printf("  该中间件存在 handleBefore 方法，开始注册\n")
+		fmt.Printf("  该中间件存在 HandleBefore 方法，开始注册\n")
 
 		// 3. 封装为 Gin 中间件并注册
 		R.Use(func(c *gin.Context) {
 			// 调用前终极校验
 			if !validMethod.IsValid() {
-				fmt.Printf("  警告：handleBefore 方法无效，跳过执行\n")
+				fmt.Printf("  警告：HandleBefore 方法无效，跳过执行\n")
 				return
 			}
 			if c == nil {
@@ -189,7 +220,7 @@ func InitRouter() *gin.Engine {
 			params := []reflect.Value{reflect.ValueOf(c)}
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("  调用 handleBefore 异常：%v\n", r)
+					fmt.Printf("  调用 HandleBefore 异常：%v\n", r)
 				}
 			}()
 			validMethod.Call(params)
