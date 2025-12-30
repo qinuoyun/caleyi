@@ -9,6 +9,7 @@ import (
 
 var (
 	softwareApp         string
+	softwareMiddlewares map[string]interface{}
 	softwareControllers map[string]interface{}
 	softwareModules     map[string]interface{}
 	softwareServices    map[string]interface{}
@@ -21,6 +22,7 @@ func init() {
 
 func SoftwareInit() {
 	softwareApp = ""
+	softwareMiddlewares = make(map[string]interface{})
 	softwareControllers = make(map[string]interface{})
 	softwareModules = make(map[string]interface{})
 	softwareServices = make(map[string]interface{})
@@ -125,6 +127,31 @@ func BinService(service interface{}) bool {
 	// 存入 Map 列表
 	softwareServices[cleanedName] = service
 	return true
+}
+
+// BinMiddleware 绑定中间件（修正注释描述，原注释写的"绑定服务"）
+func BinMiddleware(middleware interface{}) bool {
+	t := reflect.TypeOf(middleware)
+	var cleanedName string
+	// 2. 区分指针类型和非指针类型，分别获取名称
+	switch t.Kind() {
+	case reflect.Ptr:
+		cleanedName = t.Elem().Name()
+	default:
+		return false
+	}
+	// 存入 Map 列表
+	softwareMiddlewares[cleanedName] = middleware
+	return true
+}
+
+// GetMiddlewaresList 获取所有已注册的中间件（修正注释描述，原注释写的"获取所有已注册的服务"）
+func GetMiddlewaresList() []interface{} {
+	var middlewares []interface{}
+	for _, middleware := range softwareMiddlewares {
+		middlewares = append(middlewares, middleware)
+	}
+	return middlewares
 }
 
 // GetControllersList 获取所有已注册的控制器

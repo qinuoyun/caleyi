@@ -10,6 +10,9 @@ import (
 
 func BootStart() {
 
+	//初始化中间件
+	common.InitMiddleware()
+
 	//初始化模型
 	common.InitModule()
 

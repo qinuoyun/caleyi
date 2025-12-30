@@ -19,6 +19,9 @@ type Module interface{}
 // Service 定义服务层接口
 type Service interface{}
 
+// Middlewares 定义中间件接口
+type Middlewares interface{}
+
 // Software 定义完整插件接口
 type Software interface {
 	// Init 初始化插件（传入配置文件路径）
@@ -26,6 +29,7 @@ type Software interface {
 	GetControllers() []Controller
 	GetModules() []Module
 	GetServices() []Service
+	GetMiddlewares() []Middlewares
 }
 
 // Route 路由结构体
@@ -77,6 +81,17 @@ func ConvertToServices(services []interface{}) []Service {
 	var result []Service
 	for _, s := range services {
 		if svc, ok := s.(Service); ok {
+			result = append(result, svc)
+		}
+	}
+	return result
+}
+
+// ConvertToMiddlewares 将通用接口类型转换为 Middlewares 类型
+func ConvertToMiddlewares(middlewares []interface{}) []Middlewares {
+	var result []Middlewares
+	for _, s := range middlewares {
+		if svc, ok := s.(Middlewares); ok {
 			result = append(result, svc)
 		}
 	}

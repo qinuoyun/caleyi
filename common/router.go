@@ -1,10 +1,9 @@
 package common
 
-//一定要导入这个Controller包，用来注册需要访问的方法
-//这里路由-由构架是添加-开发者仅在指定工程目录下controller.go文件添加宝即可
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -13,6 +12,71 @@ import (
 	"github.com/qinuoyun/caleyi/middleware"
 	"github.com/qinuoyun/caleyi/utils/ci"
 )
+
+// HasHandleBeforeByReflect
+// 终极优化反射检测函数（确保能找到值/指针接收者方法）
+func HasHandleBeforeByReflect(obj interface{}) (bool, reflect.Value) {
+	// 1. 处理 nil 实例
+	if obj == nil {
+		fmt.Printf("  反射检测：obj 为 nil\n")
+		return false, reflect.Value{}
+	}
+
+	// 2. 获取反射值对象和类型对象
+	val := reflect.ValueOf(obj)
+	typ := reflect.TypeOf(obj)
+	if !val.IsValid() || typ == nil {
+		fmt.Printf("  反射检测：反射对象无效\n")
+		return false, reflect.Value{}
+	}
+
+	var method reflect.Value
+	// 3. 分场景强制查找方法（指针 → 值类型，层层兜底）
+	// 场景1：先查找当前实例（指针/值）的方法
+	method = val.MethodByName("handleBefore")
+	if method.IsValid() {
+		goto checkSignature // 找到方法，直接校验签名
+	}
+
+	// 场景2：当前实例未找到，若为指针则取值类型再查找
+	if val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			fmt.Printf("  反射检测：指针实例为 nil，无法取值\n")
+			return false, reflect.Value{}
+		}
+		elemVal := val.Elem()
+		method = elemVal.MethodByName("handleBefore")
+		if method.IsValid() {
+			goto checkSignature // 找到方法，直接校验签名
+		}
+	}
+
+	// 场景3：所有场景都未找到方法
+	fmt.Printf("  反射检测：未找到 handleBefore 方法\n")
+	return false, reflect.Value{}
+
+	// 4. 严格校验方法签名
+checkSignature:
+	methodType := method.Type()
+	// 4.1 校验参数数量：仅1个业务参数（*gin.Context）
+	if methodType.NumIn() != 1 {
+		fmt.Printf("  反射检测：参数数量不符，预期1个，实际%d个\n", methodType.NumIn())
+		return false, reflect.Value{}
+	}
+	// 4.2 校验参数类型：必须是 *gin.Context
+	contextType := reflect.TypeOf(&gin.Context{})
+	if methodType.In(0) != contextType {
+		fmt.Printf("  反射检测：参数类型不符，预期*gin.Context，实际%s\n", methodType.In(0))
+		return false, reflect.Value{}
+	}
+	// 4.3 校验返回值数量：必须为0
+	if methodType.NumOut() != 0 {
+		fmt.Printf("  反射检测：返回值数量不符，预期0个，实际%d个\n", methodType.NumOut())
+		return false, reflect.Value{}
+	}
+
+	return true, method
+}
 
 func InitRouter() *gin.Engine {
 	//初始化路由
@@ -23,14 +87,8 @@ func InitRouter() *gin.Engine {
 	}
 	//访问公共目录
 	R.Static("/static", "./static")
-
-	//访问公共目录
 	R.Static("/public", "./public")
-
-	//访问公共目录
 	R.Static("/uploads", "./uploads")
-
-	//访问公共目录
 	R.Static("/web", "./views/web")
 
 	// 处理静态文件和默认页面
@@ -81,6 +139,13 @@ func InitRouter() *gin.Engine {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	// 获取原始中间件切片（不做任何转换）
+	middlewareList := ci.GetMiddlewaresList()
+	fmt.Printf("原始 middlewareList 长度：%d\n", len(middlewareList))
+	for i, item := range middlewareList {
+		fmt.Printf("  原始索引 %d：类型=%T，值=%+v，是否nil=%v\n", i, item, item, item == nil)
+	}
+
 	//4.验证token
 	R.Use(middleware.JwtVerify)
 
@@ -94,16 +159,42 @@ func InitRouter() *gin.Engine {
 		c.JSON(404, gin.H{"code": 404, "message": "您" + method + "请求地址：" + path + "不存在！"})
 	})
 
-	// 获取所自定义中间件
-	middlewaresMap := ci.GetMiddlewares()
+	for i, mw := range middlewareList {
+		fmt.Printf("\n=== 处理中间件（索引：%d，类型：%T）===\n", i, mw)
 
-	// 循环遍历并判断是否有 index 方法，有则绑定
-	for _, value := range middlewaresMap {
-		if indexMethod, ok := value.(interface{ Index() gin.HandlerFunc }); ok {
-			R.Use(indexMethod.Index())
+		// 1. 反射检测是否存在有效 handleBefore 方法
+		hasBefore, methodVal := HasHandleBeforeByReflect(mw)
+		if !hasBefore {
+			fmt.Printf("  该中间件不存在有效 handleBefore 方法，跳过注册\n")
+			continue
 		}
-	}
 
+		// 2. 捕获当前循环的 methodVal，解决闭包作用域覆盖问题
+		validMethod := methodVal
+		fmt.Printf("  该中间件存在 handleBefore 方法，开始注册\n")
+
+		// 3. 封装为 Gin 中间件并注册
+		R.Use(func(c *gin.Context) {
+			// 调用前终极校验
+			if !validMethod.IsValid() {
+				fmt.Printf("  警告：handleBefore 方法无效，跳过执行\n")
+				return
+			}
+			if c == nil {
+				fmt.Printf("  警告：gin.Context 为 nil，跳过执行\n")
+				return
+			}
+
+			// 准备参数并安全调用
+			params := []reflect.Value{reflect.ValueOf(c)}
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("  调用 handleBefore 异常：%v\n", r)
+				}
+			}()
+			validMethod.Call(params)
+		})
+	}
 	//绑定基本路由，访问路径：/User/List
 	ci.Bind(R)
 	//绑定插件路由
