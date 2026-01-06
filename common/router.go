@@ -175,7 +175,7 @@ func InitRouter() *gin.Engine {
 	//访问公共目录
 	R.Static("/static", "./static")
 	R.Static("/public", "./public")
-	R.Static("/uploads", "./uploads")
+	R.Static("/uploads", "./runtime/uploads")
 	R.Static("/web", "./views/web")
 
 	// 处理静态文件和默认页面
