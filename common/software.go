@@ -99,12 +99,22 @@ func ConvertToMiddlewares(middlewares []interface{}) []Middlewares {
 }
 
 // BindSoftwareRoutes Bind 绑定路由 m是方法GET POST等
-func BindSoftwareRoutes(e *gin.Engine) {
+func BindSoftwareRoutes(e *gin.Engine, apiGroup *gin.RouterGroup) {
 	//fmt.Printf("====我是插件路由-查看路径名称%v\n", Routes)
 	for _, route := range Routes {
 		//fmt.Printf("查看路径名称%v\n", route.path)
-		//只允许GET或者POST
-		e.Match([]string{"GET", "POST"}, route.path, matchPath(route.path, route))
+		// 只允许GET或者POST
+		if len(route.path) >= 4 && route.path[:4] == "/api" {
+			// /api 开头的路由 → 注册到 apiGroup（继承JWT/Tenant验证）
+			subPath := route.path[4:]
+			if subPath == "" {
+				subPath = "/"
+			}
+			apiGroup.Match([]string{"GET", "POST"}, subPath, matchPath(route.path, route))
+		} else {
+			// 非 /api 开头的路由 → 直接注册到 gin.Engine（无认证）
+			e.Match([]string{"GET", "POST"}, route.path, matchPath(route.path, route))
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package common
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ import (
 func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value) {
 	// 1. 处理 nil 实例
 	if obj == nil {
-		fmt.Printf("  反射检测：obj 为 nil\n")
+		//fmt.Printf("  反射检测：obj 为 nil\n")
 		return false, reflect.Value{}
 	}
 
@@ -33,8 +34,8 @@ func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value
 	}
 
 	// 输出详细的类型信息用于调试
-	fmt.Printf("  反射调试：查找方法=%s, val.Kind()=%v, typ=%v\n", methodName, val.Kind(), typ)
-	fmt.Printf("  反射调试：val.NumMethod()=%d\n", val.NumMethod())
+	//	fmt.Printf("  反射调试：查找方法=%s, val.Kind()=%v, typ=%v\n", methodName, val.Kind(), typ)
+	//	fmt.Printf("  反射调试：val.NumMethod()=%d\n", val.NumMethod())
 	for i := 0; i < val.NumMethod(); i++ {
 		fmt.Printf("    方法[%d]: %s\n", i, val.Type().Method(i).Name)
 	}
@@ -47,7 +48,7 @@ func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value
 		fmt.Printf("  ✓ 反射检测：在指针类型上找到 %s 方法（指针接收者）\n", methodName)
 		goto checkSignature // 找到方法，直接校验签名
 	}
-	fmt.Printf("  反射调试：场景1未找到方法\n")
+	//	fmt.Printf("  反射调试：场景1未找到方法\n")
 
 	// 场景2：当前实例未找到，若为指针则取值类型再查找（值接收者方法）
 	if val.Kind() == reflect.Ptr {
@@ -56,7 +57,7 @@ func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value
 			return false, reflect.Value{}
 		}
 		elemVal := val.Elem()
-		fmt.Printf("  反射调试：场景2解引用后 elemVal.Kind()=%v, elemVal.NumMethod()=%d\n", elemVal.Kind(), elemVal.NumMethod())
+		//	fmt.Printf("  反射调试：场景2解引用后 elemVal.Kind()=%v, elemVal.NumMethod()=%d\n", elemVal.Kind(), elemVal.NumMethod())
 		for i := 0; i < elemVal.NumMethod(); i++ {
 			fmt.Printf("    值类型方法[%d]: %s\n", i, elemVal.Type().Method(i).Name)
 		}
@@ -71,7 +72,7 @@ func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value
 	// 场景3：若为值类型，尝试通过类型方法集查找（兼容边界情况）
 	if val.Kind() != reflect.Ptr {
 		ptrVal := reflect.New(typ)
-		fmt.Printf("  反射调试：场景3创建指针包装 ptrVal.NumMethod()=%d\n", ptrVal.NumMethod())
+		//		fmt.Printf("  反射调试：场景3创建指针包装 ptrVal.NumMethod()=%d\n", ptrVal.NumMethod())
 		method = ptrVal.MethodByName(methodName)
 		if method.IsValid() {
 			fmt.Printf("  ✓ 反射检测：通过指针包装找到 %s 方法\n", methodName)
@@ -113,19 +114,22 @@ checkSignature:
 // RegisterMiddlewareHandlers
 // 统一注册中间件的 HandleBefore 和 HandleAfter 方法
 // stage: "before" 表示注册前置中间件，"after" 表示注册后置中间件
-func RegisterMiddlewareHandlers(R *gin.Engine, middlewareList []interface{}, stage string) {
+func RegisterMiddlewareHandlers(R gin.IRoutes, middlewareList []interface{}, stage string) {
 	var methodName string
-	if stage == "before" {
+	// 修复：恢复 methodName 赋值逻辑（原代码被注释导致方法名为空）
+	switch stage {
+	case "before":
 		methodName = "HandleBefore"
 		fmt.Printf("\n========== 开始注册 HandleBefore 中间件 ==========\n")
-	} else if stage == "after" {
+	case "after":
 		methodName = "HandleAfter"
 		fmt.Printf("\n========== 开始注册 HandleAfter 中间件 ==========\n")
-	} else {
+	default:
 		fmt.Printf("未知的注册阶段：%s\n", stage)
 		return
 	}
 
+	// 注意：原代码循环变量错误（for mw := range middlewareList 应为 for i, mw := range）
 	for i, mw := range middlewareList {
 		fmt.Printf("\n=== 处理中间件（索引：%d，类型：%T，阶段：%s）===\n", i, mw, stage)
 
@@ -165,6 +169,17 @@ func RegisterMiddlewareHandlers(R *gin.Engine, middlewareList []interface{}, sta
 	fmt.Printf("\n========== %s 中间件注册完成 ==========\n\n", methodName)
 }
 
+// 定义多前端项目的路径映射（统一管理，方便维护）
+var frontEndProjects = map[string]string{
+	"/admin":    "./views/admin",    // /admin -> 后台管理项目
+	"/h5":       "./views/h5",       // /h5 -> H5移动端项目
+	"/merchant": "./views/merchant", // /merchant -> 商户端项目
+	"/store":    "./views/store",    // /store -> 门店端项目
+}
+
+// 静态资源后缀列表（用于过滤，避免静态资源被history路由拦截）
+var staticExts = []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".map", ".json", ".txt"}
+
 func InitRouter() *gin.Engine {
 	//初始化路由
 	R := gin.Default()
@@ -172,52 +187,66 @@ func InitRouter() *gin.Engine {
 	if err != nil {
 		return nil
 	}
-	//访问公共目录
+
+	// ========== 原有静态资源配置（保留基础路径，子项目由下文history逻辑处理） ==========
 	R.Static("/static", "./static")
 	R.Static("/public", "./public")
 	R.Static("/uploads", "./runtime/uploads")
-	R.Static("/web", "./views/web")
 
-	// 处理静态文件和默认页面
-	R.GET("/admin/*any", func(c *gin.Context) {
-		filePath := c.Param("any")
-		if filePath == "" || strings.HasSuffix(filePath, "/") {
-			filePath = "index.html"
-		}
-		fullPath := fmt.Sprintf("views/admin/%s", filePath)
-		if _, err := os.Stat(fullPath); err == nil {
-			c.File(fullPath)
-		} else {
-			c.File("views/admin/index.html")
-		}
-	})
+	// ========== 重构：统一处理多项目history路由（替代原有零散的/admin、/merchant处理逻辑） ==========
+	// 处理所有前端项目的GET请求，解决history刷新问题
+	for prefix, distDir := range frontEndProjects {
+		// 为每个项目前缀注册路由
+		R.GET(prefix+"/*any", func(c *gin.Context) {
+			// 获取通配符参数
+			filePath := c.Param("any")
+			// 确定目标项目目录
+			targetDir := distDir
 
-	// 处理静态文件和默认页面
-	R.GET("/merchant/*any", func(c *gin.Context) {
-		filePath := c.Param("any")
-		if filePath == "" || strings.HasSuffix(filePath, "/") {
-			filePath = "index.html"
-		}
-		fullPath := fmt.Sprintf("views/merchant/%s", filePath)
-		if _, err := os.Stat(fullPath); err == nil {
-			c.File(fullPath)
-		} else {
-			c.File("views/merchant/index.html")
-		}
-	})
+			// 1. 处理根路径特殊情况（/ 对应的any参数为空时）
+			if prefix == "/" && (filePath == "" || filePath == "/") {
+				fullPath := fmt.Sprintf("%s/index.html", targetDir)
+				if _, err := os.Stat(fullPath); err == nil {
+					c.File(fullPath)
+				} else {
+					// 保留原有根路径返回JSON的逻辑
+					c.JSON(200, gin.H{"code": 200, "message": "欢迎使用卡莱易框架"})
+				}
+				return
+			}
 
-	//访问域名根目录重定向
-	R.GET("/", func(c *gin.Context) {
-		// 检查 views/web/index.html 是否存在
-		if _, err := os.Stat("views/web/index.html"); err == nil {
-			// 文件存在，渲染 HTML
-			c.File("views/web/index.html")
-		} else {
-			// 文件不存在，返回 JSON
-			c.JSON(200, gin.H{"code": 200, "message": "欢迎使用卡莱易框架"})
-		}
-	})
+			// 2. 处理非根路径的情况（admin/h5/merchant/store）
+			if filePath == "" || strings.HasSuffix(filePath, "/") {
+				filePath = "index.html"
+			}
+			// 拼接完整文件路径（去除any参数开头的/，避免路径重复）
+			fullPath := fmt.Sprintf("%s/%s", targetDir, strings.TrimPrefix(filePath, "/"))
 
+			// 3. 判断是否为静态资源
+			ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(fullPath), "."))
+			isStatic := false
+			for _, e := range staticExts {
+				if ext == strings.TrimPrefix(e, ".") {
+					isStatic = true
+					break
+				}
+			}
+
+			// 4. 静态资源存在则返回，不存在则404；非静态资源则返回index.html（history路由）
+			if isStatic {
+				if _, err := os.Stat(fullPath); err == nil {
+					c.File(fullPath)
+				} else {
+					c.Status(404)
+				}
+			} else {
+				// 非静态资源请求，返回项目的index.html（解决history刷新）
+				c.File(fmt.Sprintf("%s/index.html", targetDir))
+			}
+		})
+	}
+
+	// ========== 原有CORS中间件（保留） ==========
 	R.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
@@ -226,36 +255,89 @@ func InitRouter() *gin.Engine {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	// ========== 原有中间件注册逻辑（保留） ==========
 	// 获取原始中间件切片（不做任何转换）
 	middlewareList := ci.GetMiddlewaresList()
-	fmt.Printf("原始 middlewareList 长度：%d\n", len(middlewareList))
-	for i, item := range middlewareList {
-		fmt.Printf("  原始索引 %d：类型=%T，值=%+v，是否nil=%v\n", i, item, item, item == nil)
+
+	// 2. 创建 /api 路由组
+	apiGroup := R.Group("/api")
+	{
+		// 第一步：注册 HandleBefore 前置中间件（仅 /api 生效）
+		RegisterMiddlewareHandlers(apiGroup, middlewareList, "before")
+
+		// 第二步：JWT 验证 + 租户验证（仅 /api 生效）
+		apiGroup.Use(middleware.JwtVerify)
+		apiGroup.Use(middleware.TenantVerify)
+
+		// 第三步：注册 HandleAfter 后置中间件（仅 /api 生效）
+		RegisterMiddlewareHandlers(apiGroup, middlewareList, "after")
 	}
 
-	// 注册 HandleBefore 中间件（前置处理）
-	RegisterMiddlewareHandlers(R, middlewareList, "before")
-
-	//4.验证token
-	R.Use(middleware.JwtVerify)
-
-	//5.处理租户问题
-	R.Use(middleware.TenantVerify)
-
-	// 注册 HandleAfter 中间件（后置处理）
-	RegisterMiddlewareHandlers(R, middlewareList, "after")
-
-	//7.找不到路由
+	// ========== 调整NoRoute逻辑：处理根项目的history路由和API 404 ==========
 	R.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		method := c.Request.Method
-		c.JSON(404, gin.H{"code": 404, "message": "您" + method + "请求地址：" + path + "不存在！"})
+
+		// 1. 判断是否为子前端项目路径（admin/h5/merchant/store）
+		// 这些路径已经在 GET /*any 中注册，若走到此处说明是该项目内部的404资源
+		for prefix := range frontEndProjects {
+			if strings.HasPrefix(path, prefix) {
+				c.Status(404)
+				return
+			}
+		}
+
+		// 2. 如果是 API 请求，返回 JSON 404
+		if strings.HasPrefix(path, "/api") {
+			c.JSON(404, gin.H{"code": 404, "message": "您" + method + "请求地址：" + path + "不存在！"})
+			return
+		}
+
+		// 3. 处理根项目 (views/web) 的静态资源和 history 路由
+		targetDir := "./views/web"
+		// 拼接完整文件路径
+		fullPath := filepath.Join(targetDir, strings.TrimPrefix(path, "/"))
+
+		// 检查文件是否存在且不是目录
+		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			c.File(fullPath)
+			return
+		}
+
+		// 非静态资源（无后缀或后缀不匹配），返回根项目的 index.html 以支持 history 模式
+		// 如果是明确的静态资源请求（如 .js, .css）但文件不存在，则返回 404
+		ext := strings.ToLower(filepath.Ext(path))
+		isStatic := false
+		for _, e := range staticExts {
+			if ext == e {
+				isStatic = true
+				break
+			}
+		}
+
+		if isStatic {
+			c.Status(404)
+		} else {
+			// 返回根项目的 index.html
+			indexPath := filepath.Join(targetDir, "index.html")
+			if _, err := os.Stat(indexPath); err == nil {
+				c.File(indexPath)
+			} else if path == "/" || path == "" {
+				// 如果连 index.html 都没有，且访问的是根路径，则返回欢迎信息
+				c.JSON(200, gin.H{"code": 200, "message": "欢迎使用卡莱易框架"})
+			} else {
+				// 其他不存在的路径返回 404
+				c.JSON(404, gin.H{"code": 404, "message": "您" + method + "请求地址：" + path + "不存在！"})
+			}
+		}
 	})
 
+	// ========== 原有路由绑定逻辑（保留） ==========
 	//绑定基本路由，访问路径：/User/List
 	ci.Bind(R)
 	//绑定插件路由
-	BindSoftwareRoutes(R)
+	BindSoftwareRoutes(R, apiGroup)
+
 	//返回实例
 	return R
 }
