@@ -1,10 +1,11 @@
 package ci
 
 import (
-	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 	"reflect"
 	"strings"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 var modules map[string]interface{}

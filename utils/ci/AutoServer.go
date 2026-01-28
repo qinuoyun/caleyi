@@ -23,7 +23,7 @@ func RegisterServer(module interface{}) bool {
 	//获取模型名称，并且去除*号的设置
 	cleanedName := RemoveStarFromTypeName(module)
 
-	//fmt.Printf("[%s]这里是执行了RegisterServer 注册服务\n", cleanedName)
+	fmt.Printf("[%s]这里是执行了RegisterServer 注册服务\n", cleanedName)
 	//存入Map列表
 	servers[cleanedName] = module
 	return true
@@ -45,7 +45,7 @@ func Server(name, methodName string, args ...interface{}) (interface{}, error) {
 	// 将输入的 name 转换成首字母大写的格式相连
 	if strings.Count(name, ".") == 0 {
 		// 如果用户只输入一个部分，重复该部分
-		name = FirstUpper(strings.ToLower(name)) + "." + FirstUpper(strings.ToLower(name))
+		name = FirstUpper(strings.ToLower(name))
 	} else {
 		parts := strings.Split(name, ".")
 		for i, part := range parts {
@@ -55,7 +55,11 @@ func Server(name, methodName string, args ...interface{}) (interface{}, error) {
 		name = strings.Join(parts, ".")
 	}
 	// 使用 + 操作符拼接字符串
-	name = name + "Server"
+	name = name + "Service"
+
+	fmt.Printf("[%s]这里是执行了Server 调用服务\n", name)
+
+	fmt.Printf("[%s]这里是执行了Server 调用服务\n", servers)
 
 	// 获取 modules 中对应的模型切片
 	serverSlice, exists := servers[name]

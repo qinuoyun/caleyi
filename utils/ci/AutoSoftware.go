@@ -117,13 +117,16 @@ func BinModule(module interface{}) bool {
 
 // BinService 绑定服务
 func BinService(service interface{}) bool {
-	vbf := reflect.ValueOf(service)
-	// 非模型或无方法则直接返回
-	if vbf.NumMethod() == 0 {
+	t := reflect.TypeOf(service)
+	var cleanedName string
+	// 2. 区分指针类型和非指针类型,分别获取名称
+	switch t.Kind() {
+	case reflect.Ptr:
+		cleanedName = t.Elem().Name()
+	default:
 		return false
 	}
-	// 获取模型名称，并且去除 * 号的设置
-	cleanedName := RemoveStarFromTypeName(service)
+	//fmt.Printf("3.获得模型的路径%s", cleanedName)
 	// 存入 Map 列表
 	softwareServices[cleanedName] = service
 	return true

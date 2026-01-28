@@ -29,7 +29,7 @@ func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value
 	val := reflect.ValueOf(obj)
 	typ := reflect.TypeOf(obj)
 	if !val.IsValid() || typ == nil {
-		fmt.Printf("  反射检测：反射对象无效\n")
+		//fmt.Printf("  反射检测：反射对象无效\n")
 		return false, reflect.Value{}
 	}
 
@@ -37,7 +37,7 @@ func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value
 	//	fmt.Printf("  反射调试：查找方法=%s, val.Kind()=%v, typ=%v\n", methodName, val.Kind(), typ)
 	//	fmt.Printf("  反射调试：val.NumMethod()=%d\n", val.NumMethod())
 	for i := 0; i < val.NumMethod(); i++ {
-		fmt.Printf("    方法[%d]: %s\n", i, val.Type().Method(i).Name)
+		//fmt.Printf("    方法[%d]: %s\n", i, val.Type().Method(i).Name)
 	}
 
 	var method reflect.Value
@@ -45,7 +45,7 @@ func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value
 	// 场景1：先查找当前实例（指针/值）的方法（指针接收者方法）
 	method = val.MethodByName(methodName)
 	if method.IsValid() {
-		fmt.Printf("  ✓ 反射检测：在指针类型上找到 %s 方法（指针接收者）\n", methodName)
+		//fmt.Printf("  ✓ 反射检测：在指针类型上找到 %s 方法（指针接收者）\n", methodName)
 		goto checkSignature // 找到方法，直接校验签名
 	}
 	//	fmt.Printf("  反射调试：场景1未找到方法\n")
@@ -53,39 +53,39 @@ func HasMethodByReflect(obj interface{}, methodName string) (bool, reflect.Value
 	// 场景2：当前实例未找到，若为指针则取值类型再查找（值接收者方法）
 	if val.Kind() == reflect.Ptr {
 		if val.IsNil() {
-			fmt.Printf("  反射检测：指针实例为 nil，无法取值\n")
+			//fmt.Printf("  反射检测：指针实例为 nil，无法取值\n")
 			return false, reflect.Value{}
 		}
 		elemVal := val.Elem()
 		//	fmt.Printf("  反射调试：场景2解引用后 elemVal.Kind()=%v, elemVal.NumMethod()=%d\n", elemVal.Kind(), elemVal.NumMethod())
-		for i := 0; i < elemVal.NumMethod(); i++ {
-			fmt.Printf("    值类型方法[%d]: %s\n", i, elemVal.Type().Method(i).Name)
-		}
+		// for i := 0; i < elemVal.NumMethod(); i++ {
+		// 	//fmt.Printf("    值类型方法[%d]: %s\n", i, elemVal.Type().Method(i).Name)
+		// }
 		method = elemVal.MethodByName(methodName)
 		if method.IsValid() {
-			fmt.Printf("  ✓ 反射检测：在值类型上找到 %s 方法（值接收者）\n", methodName)
+			//fmt.Printf("  ✓ 反射检测：在值类型上找到 %s 方法（值接收者）\n", methodName)
 			goto checkSignature // 找到方法，直接校验签名
 		}
-		fmt.Printf("  反射调试：场景2未找到方法\n")
+		//fmt.Printf("  反射调试：场景2未找到方法\n")
 	}
 
 	// 场景3：若为值类型，尝试通过类型方法集查找（兼容边界情况）
 	if val.Kind() != reflect.Ptr {
 		ptrVal := reflect.New(typ)
-		//		fmt.Printf("  反射调试：场景3创建指针包装 ptrVal.NumMethod()=%d\n", ptrVal.NumMethod())
+		//fmt.Printf("  反射调试：场景3创建指针包装 ptrVal.NumMethod()=%d\n", ptrVal.NumMethod())
 		method = ptrVal.MethodByName(methodName)
 		if method.IsValid() {
-			fmt.Printf("  ✓ 反射检测：通过指针包装找到 %s 方法\n", methodName)
+			//fmt.Printf("  ✓ 反射检测：通过指针包装找到 %s 方法\n", methodName)
 			// 注意：此时需要重新绑定实例到原始对象
 			ptrVal.Elem().Set(val)
 			method = ptrVal.MethodByName(methodName)
 			goto checkSignature
 		}
-		fmt.Printf("  反射调试：场景3未找到方法\n")
+		//fmt.Printf("  反射调试：场景3未找到方法\n")
 	}
 
 	// 场景4：所有场景都未找到方法
-	fmt.Printf("  ✗ 反射检测：未找到 %s 方法\n", methodName)
+	//fmt.Printf("  ✗ 反射检测：未找到 %s 方法\n", methodName)
 	return false, reflect.Value{}
 
 	// 4. 严格校验方法签名
@@ -93,18 +93,18 @@ checkSignature:
 	methodType := method.Type()
 	// 4.1 校验参数数量：仅1个业务参数（*gin.Context）
 	if methodType.NumIn() != 1 {
-		fmt.Printf("  反射检测：%s 参数数量不符，预期1个，实际%d个\n", methodName, methodType.NumIn())
+		//fmt.Printf("  反射检测：%s 参数数量不符，预期1个，实际%d个\n", methodName, methodType.NumIn())
 		return false, reflect.Value{}
 	}
 	// 4.2 校验参数类型：必须是 *gin.Context
 	contextType := reflect.TypeOf(&gin.Context{})
 	if methodType.In(0) != contextType {
-		fmt.Printf("  反射检测：%s 参数类型不符，预期*gin.Context，实际%s\n", methodName, methodType.In(0))
+		//fmt.Printf("  反射检测：%s 参数类型不符，预期*gin.Context，实际%s\n", methodName, methodType.In(0))
 		return false, reflect.Value{}
 	}
 	// 4.3 校验返回值数量：必须为0
 	if methodType.NumOut() != 0 {
-		fmt.Printf("  反射检测：%s 返回值数量不符，预期0个，实际%d个\n", methodName, methodType.NumOut())
+		//fmt.Printf("  反射检测：%s 返回值数量不符，预期0个，实际%d个\n", methodName, methodType.NumOut())
 		return false, reflect.Value{}
 	}
 
@@ -120,53 +120,53 @@ func RegisterMiddlewareHandlers(R gin.IRoutes, middlewareList []interface{}, sta
 	switch stage {
 	case "before":
 		methodName = "HandleBefore"
-		fmt.Printf("\n========== 开始注册 HandleBefore 中间件 ==========\n")
+		//fmt.Printf("\n========== 开始注册 HandleBefore 中间件 ==========\n")
 	case "after":
 		methodName = "HandleAfter"
-		fmt.Printf("\n========== 开始注册 HandleAfter 中间件 ==========\n")
+		//fmt.Printf("\n========== 开始注册 HandleAfter 中间件 ==========\n")
 	default:
-		fmt.Printf("未知的注册阶段：%s\n", stage)
+		//fmt.Printf("未知的注册阶段：%s\n", stage)
 		return
 	}
 
-	// 注意：原代码循环变量错误（for mw := range middlewareList 应为 for i, mw := range）
-	for i, mw := range middlewareList {
-		fmt.Printf("\n=== 处理中间件（索引：%d，类型：%T，阶段：%s）===\n", i, mw, stage)
+	// 注意:原代码循环变量错误(for mw := range middlewareList 应为 for i, mw := range)
+	for _, mw := range middlewareList {
+		//fmt.Printf("\n=== 处理中间件(索引:%d,类型:%T,阶段:%s)===\n", i, mw, stage)
 
 		// 反射检测是否存在有效方法
 		hasMethod, methodVal := HasMethodByReflect(mw, methodName)
 		if !hasMethod {
-			fmt.Printf("  该中间件不存在有效 %s 方法，跳过注册\n", methodName)
+			//fmt.Printf("  该中间件不存在有效 %s 方法，跳过注册\n", methodName)
 			continue
 		}
 
 		// 捕获当前循环的 methodVal，解决闭包作用域覆盖问题
 		validMethod := methodVal
-		fmt.Printf("  该中间件存在 %s 方法，开始注册\n", methodName)
+		//fmt.Printf("  该中间件存在 %s 方法，开始注册\n", methodName)
 
 		// 封装为 Gin 中间件并注册
 		R.Use(func(c *gin.Context) {
 			// 调用前终极校验
 			if !validMethod.IsValid() {
-				fmt.Printf("  警告：%s 方法无效，跳过执行\n", methodName)
+				//fmt.Printf("  警告：%s 方法无效，跳过执行\n", methodName)
 				return
 			}
 			if c == nil {
-				fmt.Printf("  警告：gin.Context 为 nil，跳过执行\n")
+				//fmt.Printf("  警告：gin.Context 为 nil，跳过执行\n")
 				return
 			}
 
 			// 准备参数并安全调用
 			params := []reflect.Value{reflect.ValueOf(c)}
-			defer func() {
-				if r := recover(); r != nil {
-					fmt.Printf("  调用 %s 异常：%v\n", methodName, r)
-				}
-			}()
+			// defer func() {
+			// 	if r := recover(); r != nil {
+			// 		fmt.Printf("  调用 %s 异常：%v\n", methodName, r)
+			// 	}
+			// }()
 			validMethod.Call(params)
 		})
 	}
-	fmt.Printf("\n========== %s 中间件注册完成 ==========\n\n", methodName)
+	//fmt.Printf("\n========== %s 中间件注册完成 ==========\n\n", methodName)
 }
 
 // 定义多前端项目的路径映射（统一管理，方便维护）
