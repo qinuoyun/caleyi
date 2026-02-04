@@ -73,18 +73,30 @@ func GetModules() map[string]interface{} {
 }
 
 // M NewDB 函数用于创建一个新的 DB 实例
-func M(name string) *DB {
-	// 将输入的 name 转换成首字母大写的格式相连
-	if strings.Count(name, ".") == 0 {
-		// 如果用户只输入一个部分，重复该部分
-		name = FirstUpper(strings.ToLower(name)) + "." + FirstUpper(strings.ToLower(name))
-	} else {
-		parts := strings.Split(name, ".")
-		for i, part := range parts {
-			// 仅将每个部分的首字母大写
-			parts[i] = FirstUpper(strings.ToLower(part))
+// 支持两种调用方式：
+//  1. 通过模型名称：M("models.expert")
+//  2. 直接传入模型实例：M(&models.Expert{})
+func M(model interface{}) *DB {
+	var name string
+
+	switch v := model.(type) {
+	case string:
+		name = v
+		// 将输入的 name 转换成首字母大写的格式相连
+		if strings.Count(name, ".") == 0 {
+			// 如果用户只输入一个部分，重复该部分
+			name = FirstUpper(strings.ToLower(name)) + "." + FirstUpper(strings.ToLower(name))
+		} else {
+			parts := strings.Split(name, ".")
+			for i, part := range parts {
+				// 仅将每个部分的首字母大写
+				parts[i] = FirstUpper(strings.ToLower(part))
+			}
+			name = strings.Join(parts, ".")
 		}
-		name = strings.Join(parts, ".")
+	default:
+		// 非字符串时，按类型生成模块名（与 RegisterModule 一致）
+		name = RemoveStarFromTypeName(model)
 	}
 
 	// 获取 modules 中对应的模型切片
