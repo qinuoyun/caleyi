@@ -190,3 +190,26 @@ func GetConfigPath(filename string) string {
 	exeDir := filepath.Dir(exePath)
 	return filepath.Join(exeDir, filename)
 }
+
+// GetAccountID 获取当前请求的账号ID
+func GetAccountID(c *gin.Context) int64 {
+	if val, exists := c.Get("uid"); exists {
+		switch v := val.(type) {
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case uint:
+			return int64(v)
+		case float64:
+			return int64(v)
+		}
+	}
+	if uid := c.GetUint("uid"); uid > 0 {
+		return int64(uid)
+	}
+	if uid := c.GetInt64("uid"); uid > 0 {
+		return uid
+	}
+	return 0
+}
