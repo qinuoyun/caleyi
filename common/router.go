@@ -246,14 +246,36 @@ func InitRouter() *gin.Engine {
 		})
 	}
 
-	// ========== 原有CORS中间件（保留） ==========
-	R.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-		AllowHeaders:     []string{"X-Requested-With", "Content-Type", "Authorization", "BusinessId", "verify-encrypt", "ignoreCancelToken", "verify-time"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	// ========== CORS 跨域配置（通过 config.ini [cors] 节控制） ==========
+	if ci.C("cors.enable") != "false" {
+		corsOrigins := ci.C("cors.allow_origins")
+		corsMethods := ci.C("cors.allow_methods")
+		corsHeaders := ci.C("cors.allow_headers")
+		corsCredentials := ci.C("cors.allow_credentials")
+		corsMaxAge := ci.C("cors.max_age")
+
+		// 默认值
+		if corsOrigins == "" {
+			corsOrigins = "*"
+		}
+		if corsMethods == "" {
+			corsMethods = "GET,POST,PUT,DELETE,PATCH,OPTIONS"
+		}
+		if corsHeaders == "" {
+			corsHeaders = "X-Requested-With,Content-Type,Authorization,tenant_id"
+		}
+		if corsMaxAge == "" {
+			corsMaxAge = "12"
+		}
+
+		R.Use(cors.New(cors.Config{
+			AllowOrigins:     strings.Split(corsOrigins, ","),
+			AllowMethods:     strings.Split(corsMethods, ","),
+			AllowHeaders:     strings.Split(corsHeaders, ","),
+			AllowCredentials: corsCredentials != "false",
+			MaxAge:           time.Duration(ci.ToInt(corsMaxAge)) * time.Hour,
+		}))
+	}
 
 	// ========== 原有中间件注册逻辑（保留） ==========
 	// 获取原始中间件切片（不做任何转换）

@@ -3,11 +3,12 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/qinuoyun/caleyi/utils/ci"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/qinuoyun/caleyi/utils/ci"
 )
 
 // TenantVerify  验证token
@@ -78,7 +79,11 @@ func TenantVerify(c *gin.Context) {
 		ctx := context.WithValue(c.Request.Context(), "tenant_id", tenantID)
 		db = db.WithContext(ctx)
 
-		// 可以在这里将 tenantID 存储到上下文中，供后续处理使用
+		// 绑定到当前 goroutine，ci.M() 自动获取
+		ci.BindDB(db)
+		defer ci.UnbindDB()
+
+		// 将 tenantID 存储到 gin 上下文中，供后续处理使用
 		c.Set("db", db)
 		c.Set("tenant_id", tenantID)
 		c.Next()

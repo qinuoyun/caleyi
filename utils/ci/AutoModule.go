@@ -3,7 +3,10 @@ package ci
 import (
 	"context"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -16,6 +19,40 @@ func init() {
 }
 
 var _DB *gorm.DB
+
+// goroutineDBMap 按 goroutine ID 存储当前请求的带 tenant 的 DB
+var goroutineDBMap sync.Map
+
+// getGoroutineID 获取当前 goroutine ID
+func getGoroutineID() uint64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	// 格式："goroutine 123 [running]"
+	s := string(buf[:n])
+	s = s[len("goroutine "):]
+	s = s[:strings.IndexByte(s, ' ')]
+	id, _ := strconv.ParseUint(s, 10, 64)
+	return id
+}
+
+// BindDB 将带 tenant 的 DB 绑定到当前 goroutine，供 M() 自动获取。
+// 在中间件中调用，配合 defer UnbindDB() 使用。
+func BindDB(db *gorm.DB) {
+	goroutineDBMap.Store(getGoroutineID(), db)
+}
+
+// UnbindDB 清除当前 goroutine 绑定的 DB，防止内存泄漏。
+func UnbindDB() {
+	goroutineDBMap.Delete(getGoroutineID())
+}
+
+// currentDB 获取当前 goroutine 绑定的 DB，没有则返回全局 _DB
+func currentDB() *gorm.DB {
+	if v, ok := goroutineDBMap.Load(getGoroutineID()); ok {
+		return v.(*gorm.DB)
+	}
+	return _DB
+}
 
 // DB 结构体，封装数据库操作
 type DB struct {
@@ -59,11 +96,14 @@ func DBWithTenant(tenantID string) *gorm.DB {
 }
 
 // Go 启动一个带 tenant 上下文的 goroutine，自动传递 tenant_id。
+// goroutine 内 ci.M(m) 也能自动获取 tenant。
 // 用法：ci.Go(c, func(db *gorm.DB) { db.Create(&record) })
 func Go(c *gin.Context, fn func(db *gorm.DB)) {
 	tenantID := GetTenantID(c)
 	go func() {
 		db := DBWithTenant(tenantID)
+		BindDB(db)
+		defer UnbindDB()
 		fn(db)
 	}()
 }
@@ -75,6 +115,8 @@ func GoWithContext(c *gin.Context, fn func(ctx context.Context, db *gorm.DB)) {
 	go func() {
 		ctx := TenantContext(tenantID)
 		db := _DB.WithContext(ctx)
+		BindDB(db)
+		defer UnbindDB()
 		fn(ctx, db)
 	}()
 }
@@ -86,6 +128,8 @@ func GoWait(c *gin.Context, fn func(db *gorm.DB) error) error {
 	errCh := make(chan error, 1)
 	go func() {
 		db := DBWithTenant(tenantID)
+		BindDB(db)
+		defer UnbindDB()
 		errCh <- fn(db)
 	}()
 	return <-errCh
@@ -191,17 +235,54 @@ func RegisterModule(module interface{}, path string) bool {
 	return true
 }
 
-// GetModules 用于获取所有已注册的 modules
+// GetModules 用于获取所有已注册的 modules（包含插件模块）
 func GetModules() map[string]interface{} {
+	// 合并插件注册的模块
+	for _, module := range GetModulesList() {
+		cleanedName := RemoveStarFromTypeName(module)
+		if _, ok := modules[cleanedName]; !ok {
+			modules[cleanedName] = module
+		}
+	}
 	return modules
 }
 
-// M NewDB 函数用于创建一个新的 DB 实例
-// 支持两种调用方式：
-//  1. 通过模型名称：M("models.expert")
-//  2. 直接传入模型实例：M(&models.Expert{})
+// GetModule 根据名称获取已注册的模型
+// 用法：ci.GetModule("models.Expert") 或 ci.GetModule("expert")
+func GetModule(name string) interface{} {
+	return findModule(name)
+}
+
+// findModule 统一的模块查找逻辑，支持精确匹配和模糊匹配
+func findModule(name string) interface{} {
+	// 1. 精确匹配（如 "models.Expert"）
+	if m, ok := modules[name]; ok {
+		return m
+	}
+
+	// 2. 忽略大小写匹配
+	nameLower := strings.ToLower(name)
+	for key, m := range modules {
+		// 完整 key 忽略大小写（如 "models.expert" 匹配 "models.Expert"）
+		if strings.ToLower(key) == nameLower {
+			return m
+		}
+		// 只匹配结构体名称（如 "expert" 匹配 "models.Expert"）
+		parts := strings.Split(key, ".")
+		structName := parts[len(parts)-1]
+		if strings.ToLower(structName) == nameLower {
+			return m
+		}
+	}
+
+	return nil
+}
+
+// M 创建 DB 实例，自动获取当前请求的租户上下文。
+// 在 HTTP 请求中无需传任何额外参数，中间件已自动绑定。
+// 用法：ci.M(m).Where("id = ?", 1).First(&result)
 func M(model interface{}) *DB {
-	return newDB(model, _DB)
+	return newDB(model, currentDB())
 }
 
 // MT 创建带 tenant 的 DB 实例，用于异步任务。
@@ -222,25 +303,13 @@ func newDB(model interface{}, baseDB *gorm.DB) *DB {
 	switch v := model.(type) {
 	case string:
 		name = v
-		// 将输入的 name 转换成首字母大写的格式相连
-		if strings.Count(name, ".") == 0 {
-			// 如果用户只输入一个部分，重复该部分
-			name = FirstUpper(strings.ToLower(name)) + "." + FirstUpper(strings.ToLower(name))
-		} else {
-			parts := strings.Split(name, ".")
-			for i, part := range parts {
-				// 仅将每个部分的首字母大写
-				parts[i] = FirstUpper(strings.ToLower(part))
-			}
-			name = strings.Join(parts, ".")
-		}
 	default:
 		// 非字符串时，按类型生成模块名（与 RegisterModule 一致）
 		name = RemoveStarFromTypeName(model)
 	}
 
-	// 获取 modules 中对应的模型切片
-	modelSlice := modules[name]
+	// 查找 modules：先精确匹配，再模糊匹配
+	modelSlice := findModule(name)
 
 	// 创建 DB 结构体实例
 	db := &DB{

@@ -45,7 +45,7 @@ func (m *Model) BeforeCreate(tx *gorm.DB) error {
 	if ok && tenantID != "" {
 		m.TenantID = tenantID
 	} else {
-		return fmt.Errorf("tenant ID not found in context")
+		return fmt.Errorf("【BeforeCreate】tenant ID not found in context")
 	}
 	return nil
 }
@@ -61,7 +61,7 @@ func (m *Model) BeforeQuery(tx *gorm.DB) error {
 	if ok && tenantID != "" {
 		tx.Where("tenant_id = ?", tenantID)
 	} else {
-		return fmt.Errorf("tenant ID not found in context")
+		return fmt.Errorf("【BeforeQuery】tenant ID not found in context")
 	}
 	return nil
 }
@@ -77,7 +77,7 @@ func (m *Model) BeforeDelete(tx *gorm.DB) error {
 	if ok && tenantID != "" {
 		tx.Where("tenant_id = ?", tenantID)
 	} else {
-		return fmt.Errorf("tenant ID not found in context")
+		return fmt.Errorf("【BeforeDelete】tenant ID not found in context")
 	}
 	return nil
 }
@@ -93,7 +93,7 @@ func (m *Model) BeforeUpdate(tx *gorm.DB) error {
 	if ok && tenantID != "" {
 		tx.Where("tenant_id = ?", tenantID)
 	} else {
-		return fmt.Errorf("tenant ID not found in context")
+		return fmt.Errorf("【BeforeUpdate】tenant ID not found in context")
 	}
 	return nil
 }
