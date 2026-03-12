@@ -191,7 +191,7 @@ func InitRouter() *gin.Engine {
 	// ========== 原有静态资源配置（保留基础路径，子项目由下文history逻辑处理） ==========
 	R.Static("/static", "./static")
 	R.Static("/public", "./public")
-	R.Static("/uploads", "./runtime/uploads")
+	R.Static("/uploads", "./uploads")
 
 	// ========== 重构：统一处理多项目history路由（替代原有零散的/admin、/merchant处理逻辑） ==========
 	// 处理所有前端项目的GET请求，解决history刷新问题
