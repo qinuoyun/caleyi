@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/qinuoyun/caleyi/utils/ci"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres" // 导入 PostgreSQL 驱动
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
@@ -48,8 +50,23 @@ func InitModule() {
 			ip, port, user, password, database)
 		dialector = postgres.Open(dsn) // PostgreSQL 驱动
 
+	case "sqlite":
+		// 读取 SQLite 配置，file 为数据库文件路径；文件不存在时 GORM 会自动创建
+		dbFile := ci.C("sqlite.file")
+		if dbFile == "" {
+			dbFile = "./runtime/data.db"
+		}
+		// 自动创建所在目录，否则 Open 可能失败
+		if dir := filepath.Dir(dbFile); dir != "." {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				log.Fatalf("创建 SQLite 数据目录失败: %v", err)
+			}
+		}
+		dialector = sqlite.Open(dbFile)
+		database = dbFile
+
 	default:
-		log.Fatalf("不支持的数据库类型：%s（仅支持 mysql/postgre）", sqlType)
+		log.Fatalf("不支持的数据库类型：%s（仅支持 mysql/postgre/sqlite）", sqlType)
 	}
 
 	// 初始化 GORM 日志配置

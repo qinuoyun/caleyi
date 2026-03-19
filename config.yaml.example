@@ -1,0 +1,45 @@
+# 配置文件示例：复制为 config.yaml 使用
+# 优先读取 config.yaml，不存在时再读 config.ini
+
+app:
+  app_name: CALEYI
+  log_level: DEBUG   # DEBUG, INFO, WARNING, ERROR, FATAL
+  app_port: 9090
+  app_sql: mysql     # mysql / postgres / sqlite
+  tenant_id: qn20250426
+
+mysql:
+  ip: ""
+  port: ""
+  user: ""
+  password: ""
+  database: ""
+
+pgsql:
+  ip: ""
+  port: ""
+  user: ""
+  password: ""
+  database: ""
+
+sqlite:
+  # 数据库文件路径；目录不存在会自动创建，文件不存在时 GORM 会自动创建
+  file: ./runtime/data.db
+
+redis:
+  ip: 127.0.0.1
+  port: "6379"
+
+whitelist:
+  items: []
+
+cors:
+  enable: true
+  allow_origins: "*"
+  allow_methods: GET,POST,PUT,DELETE,PATCH,OPTIONS
+  allow_headers: "X-Requested-With,Content-Type,Authorization,BusinessId,verify-encrypt,ignoreCancelToken,verify-time,tenant_id"
+  allow_credentials: true
+  max_age: "12"
+
+tenant:
+  auth: true

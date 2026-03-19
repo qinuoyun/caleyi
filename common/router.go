@@ -287,6 +287,16 @@ func InitRouter() *gin.Engine {
 		// 第一步：注册 HandleBefore 前置中间件（仅 /api 生效）
 		RegisterMiddlewareHandlers(apiGroup, middlewareList, "before")
 
+		// 若 config.ini 配置了 app.tenant_id，且请求未带 tenant_id，则自动注入到请求头
+		apiGroup.Use(func(c *gin.Context) {
+			if c.GetHeader("tenant_id") == "" && c.Query("tenant_id") == "" {
+				if defaultTenantID := ci.C("app.tenant_id"); defaultTenantID != "" {
+					c.Request.Header.Set("tenant_id", defaultTenantID)
+				}
+			}
+			c.Next()
+		})
+
 		// 第二步：JWT 验证 + 租户验证（仅 /api 生效）
 		apiGroup.Use(middleware.JwtVerify)
 		apiGroup.Use(middleware.TenantVerify)
