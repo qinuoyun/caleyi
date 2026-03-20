@@ -2,11 +2,19 @@ package caleyi
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/qinuoyun/caleyi/common"
 	"github.com/qinuoyun/caleyi/utils/ci"
 )
+
+func init() {
+	// 框架加载时即执行软件签名授权
+	if err := ci.EnsureSoftwareLicense(); err != nil {
+		log.Fatalf("框架加载时软件许可证检查失败: %v", err)
+	}
+}
 
 func BootStart() {
 
