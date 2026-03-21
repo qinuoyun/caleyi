@@ -2,10 +2,17 @@ package ci
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/rsa"
+	"crypto/x509"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type licenseStore struct {
@@ -51,14 +60,33 @@ type queryData struct {
 	ApplyID   string `json:"apply_id"`
 }
 
+type publicKeyData struct {
+	Kid       string `json:"kid"`
+	Algorithm string `json:"algorithm"`
+	PublicKey string `json:"public_key"`
+}
+
+type wrappedLicense struct {
+	License string `json:"license"`
+	Token   string `json:"token"`
+	JWT     string `json:"jwt"`
+}
+
+var licenseVerifyPublicKey interface{}
+
 // EnsureSoftwareLicense 启动时执行软件授权检查与自动申请（框架强制开启）。
 func EnsureSoftwareLicense() error {
-	baseURL := strings.TrimRight(C("license.server"), "/")
 	apiKey := C("license.api_key")
 	appID := C("license.app_id")
-	if baseURL == "" || apiKey == "" || appID == "" {
-		return fmt.Errorf("license config missing: require license.server/license.api_key/license.app_id")
+	if apiKey == "" || appID == "" {
+		return fmt.Errorf("license config missing: require license.api_key/license.app_id")
 	}
+	baseURLs := getLicenseServerCandidates()
+	pubKey, err := fetchPublicKeyFromServer(baseURLs, apiKey)
+	if err != nil {
+		return fmt.Errorf("fetch public key failed: %w", err)
+	}
+	licenseVerifyPublicKey = pubKey
 
 	storePath := C("license.store_file")
 	if storePath == "" {
@@ -73,6 +101,15 @@ func EnsureSoftwareLicense() error {
 		fmt.Printf("[license] local license expired, removed store file: %s\n", storePath)
 	}
 	if isStoreValid(store) {
+		// 本地证书存在且未过期时，先做离线验签
+		if err := verifyLicenseSignature(store.License); err == nil {
+			return nil
+		}
+		_ = os.Remove(storePath)
+		store = &licenseStore{}
+		fmt.Printf("[license] local license signature invalid, removed store file: %s\n", storePath)
+	}
+	if isStoreValid(store) {
 		return nil
 	}
 
@@ -80,7 +117,7 @@ func EnsureSoftwareLicense() error {
 	applyID := strings.TrimSpace(store.ApplyID)
 	if applyID == "" {
 		req := buildApplyRequest()
-		id, err := submitApply(baseURL, apiKey, req)
+		id, err := submitApply(baseURLs, apiKey, req)
 		if err != nil {
 			return err
 		}
@@ -94,7 +131,7 @@ func EnsureSoftwareLicense() error {
 	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
 
 	for time.Now().Before(deadline) {
-		status, err := queryApply(baseURL, apiKey, applyID)
+		status, err := queryApply(baseURLs, apiKey, applyID)
 		if err != nil {
 			time.Sleep(time.Duration(intervalSec) * time.Second)
 			continue
@@ -105,6 +142,9 @@ func EnsureSoftwareLicense() error {
 		case 1:
 			if status.License == "" {
 				return fmt.Errorf("approve success but license is empty")
+			}
+			if err := verifyLicenseSignature(status.License); err != nil {
+				return fmt.Errorf("license signature verify failed: %w", err)
 			}
 			expireAt := time.Now().Add(time.Duration(status.ExpireDay) * 24 * time.Hour).Unix()
 			if status.ExpireDay <= 0 {
@@ -142,64 +182,96 @@ func buildApplyRequest() applyRequest {
 	}
 }
 
-func submitApply(baseURL, apiKey string, req applyRequest) (string, error) {
+func submitApply(baseURLs []string, apiKey string, req applyRequest) (string, error) {
 	body, _ := json.Marshal(req)
-	url := baseURL + "/api/apply"
-	fmt.Printf("[license] apply request -> url=%s app_id=%s software_name=%s device_name=%s machine_id=%s\n",
-		url, req.AppID, req.SoftwareName, req.DeviceName, req.MachineID)
-	httpReq, _ := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		fmt.Printf("[license] apply request failed: %v\n", err)
-		return "", err
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	for _, baseURL := range baseURLs {
+		url := baseURL + "/api/apply"
+		fmt.Printf("[license] apply request -> url=%s app_id=%s software_name=%s device_name=%s machine_id=%s\n",
+			url, req.AppID, req.SoftwareName, req.DeviceName, req.MachineID)
+		httpReq, _ := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+		httpReq.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			fmt.Printf("[license] apply request failed (%s): %v\n", baseURL, err)
+			lastErr = err
+			continue
+		}
 
-	var out apiResp
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+		var out apiResp
+		decodeErr := json.NewDecoder(resp.Body).Decode(&out)
+		resp.Body.Close()
+		if decodeErr != nil {
+			lastErr = decodeErr
+			continue
+		}
+		if out.Code != 0 {
+			fmt.Printf("[license] apply response error (%s): code=%d message=%s\n", baseURL, out.Code, out.Message)
+			lastErr = fmt.Errorf("apply failed: %s", out.Message)
+			continue
+		}
+		var data applyData
+		if err := json.Unmarshal(out.Data, &data); err != nil {
+			lastErr = err
+			continue
+		}
+		if data.ApplyID == "" {
+			lastErr = fmt.Errorf("apply_id is empty")
+			continue
+		}
+		fmt.Printf("[license] apply success: apply_id=%s via=%s\n", data.ApplyID, baseURL)
+		return data.ApplyID, nil
 	}
-	if out.Code != 0 {
-		fmt.Printf("[license] apply response error: code=%d message=%s\n", out.Code, out.Message)
-		return "", fmt.Errorf("apply failed: %s", out.Message)
-	}
-	var data applyData
-	if err := json.Unmarshal(out.Data, &data); err != nil {
-		return "", err
-	}
-	if data.ApplyID == "" {
-		return "", fmt.Errorf("apply_id is empty")
-	}
-	fmt.Printf("[license] apply success: apply_id=%s\n", data.ApplyID)
-	return data.ApplyID, nil
+	return "", lastErr
 }
 
-func queryApply(baseURL, apiKey, applyID string) (*queryData, error) {
-	url := baseURL + "/api/apply/" + applyID
-	httpReq, _ := http.NewRequest(http.MethodGet, url, nil)
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+func queryApply(baseURLs []string, apiKey, applyID string) (*queryData, error) {
+	var lastErr error
+	for _, baseURL := range baseURLs {
+		url := baseURL + "/api/apply/" + applyID
+		httpReq, _ := http.NewRequest(http.MethodGet, url, nil)
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			continue
+		}
 
-	var out apiResp
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+		var out apiResp
+		decodeErr := json.NewDecoder(resp.Body).Decode(&out)
+		resp.Body.Close()
+		if decodeErr != nil {
+			lastErr = decodeErr
+			continue
+		}
+		if out.Code != 0 {
+			lastErr = fmt.Errorf("query failed: %s", out.Message)
+			continue
+		}
+		var data queryData
+		if err := json.Unmarshal(out.Data, &data); err != nil {
+			lastErr = err
+			continue
+		}
+		return &data, nil
 	}
-	if out.Code != 0 {
-		return nil, fmt.Errorf("query failed: %s", out.Message)
+	return nil, lastErr
+}
+
+func getLicenseServerCandidates() []string {
+	// 优先使用配置，未配置则按默认地址顺序兜底
+	custom := strings.TrimSpace(C("license.server"))
+	if custom != "" {
+		return []string{strings.TrimRight(custom, "/")}
 	}
-	var data queryData
-	if err := json.Unmarshal(out.Data, &data); err != nil {
-		return nil, err
+	return []string{
+		"https://auth.caleyi.com",
+		"http://auth.caleyi.com",
+		"http://authback.caleyi.com",
 	}
-	return &data, nil
 }
 
 func loadLicenseStore(path string) (*licenseStore, error) {
@@ -320,5 +392,165 @@ func readFirstLine(path string) string {
 		line = strings.TrimSpace(line[:i])
 	}
 	return line
+}
+
+// verifyLicenseSignature 对本地 license 执行 RSA/ECDSA 离线验签（JWT/JWS 格式）。
+// 公钥由授权服务器下发，不依赖本地配置。
+func verifyLicenseSignature(license string) error {
+	if licenseVerifyPublicKey == nil {
+		return errors.New("verify public key is not initialized")
+	}
+	tokenStr, err := normalizeLicenseToken(license)
+	if err != nil {
+		preview := strings.TrimSpace(license)
+		if len(preview) > 80 {
+			preview = preview[:80] + "..."
+		}
+		fmt.Printf("[license] unsupported license format, preview=%q len=%d\n", preview, len(strings.TrimSpace(license)))
+		return err
+	}
+
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		switch token.Method.(type) {
+		case *jwt.SigningMethodRSA, *jwt.SigningMethodECDSA:
+			return licenseVerifyPublicKey, nil
+		default:
+			return nil, fmt.Errorf("unsupported signing method: %s", token.Method.Alg())
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if !token.Valid {
+		return errors.New("invalid license token")
+	}
+	return nil
+}
+
+// normalizeLicenseToken 兼容两种 license 格式：
+// 1. JWT/JWS 三段式（xxx.yyy.zzz）
+// 2. Base64 包裹的 JWT（解码后为三段式）
+func normalizeLicenseToken(license string) (string, error) {
+	raw := strings.TrimSpace(license)
+	if strings.Count(raw, ".") == 2 {
+		return raw, nil
+	}
+	// 先尝试 JSON 包裹格式
+	if s := extractJWTFromJSON(raw); s != "" {
+		return s, nil
+	}
+	// 尝试标准 Base64
+	if b, err := base64.StdEncoding.DecodeString(raw); err == nil {
+		s := strings.TrimSpace(string(b))
+		if strings.Count(s, ".") == 2 {
+			return s, nil
+		}
+		if v := extractJWTFromJSON(s); v != "" {
+			return v, nil
+		}
+	}
+	// 尝试 URL Safe Base64
+	if b, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
+		s := strings.TrimSpace(string(b))
+		if strings.Count(s, ".") == 2 {
+			return s, nil
+		}
+		if v := extractJWTFromJSON(s); v != "" {
+			return v, nil
+		}
+	}
+	if b, err := base64.URLEncoding.DecodeString(raw); err == nil {
+		s := strings.TrimSpace(string(b))
+		if strings.Count(s, ".") == 2 {
+			return s, nil
+		}
+		if v := extractJWTFromJSON(s); v != "" {
+			return v, nil
+		}
+	}
+	return "", errors.New("license format unsupported: require JWT or base64-encoded JWT")
+}
+
+func extractJWTFromJSON(raw string) string {
+	var w wrappedLicense
+	if err := json.Unmarshal([]byte(raw), &w); err != nil {
+		return ""
+	}
+	candidates := []string{strings.TrimSpace(w.License), strings.TrimSpace(w.Token), strings.TrimSpace(w.JWT)}
+	for _, c := range candidates {
+		if strings.Count(c, ".") == 2 {
+			return c
+		}
+	}
+	return ""
+}
+
+func fetchPublicKeyFromServer(baseURLs []string, apiKey string) (interface{}, error) {
+	endpoints := []string{"/api/public-key", "/api/sign/public-key", "/public-key"}
+	var lastErr error
+	client := &http.Client{Timeout: 15 * time.Second}
+	for _, baseURL := range baseURLs {
+		for _, ep := range endpoints {
+			url := baseURL + ep
+			req, _ := http.NewRequest(http.MethodGet, url, nil)
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+			resp, err := client.Do(req)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				lastErr = fmt.Errorf("status %d", resp.StatusCode)
+				continue
+			}
+			raw := strings.TrimSpace(string(body))
+			// 兼容统一响应格式
+			var out apiResp
+			if json.Unmarshal(body, &out) == nil && len(out.Data) > 0 {
+				var pkData publicKeyData
+				if json.Unmarshal(out.Data, &pkData) == nil && strings.TrimSpace(pkData.PublicKey) != "" {
+					if pkData.Algorithm != "" {
+						alg := strings.ToUpper(strings.TrimSpace(pkData.Algorithm))
+						if alg != "RSA" && alg != "ECDSA" {
+							lastErr = fmt.Errorf("unsupported public key algorithm: %s", pkData.Algorithm)
+							continue
+						}
+					}
+					raw = pkData.PublicKey
+					if strings.TrimSpace(pkData.Kid) != "" {
+						fmt.Printf("[license] public key metadata: kid=%s algorithm=%s\n", pkData.Kid, pkData.Algorithm)
+					}
+				}
+			}
+			pubKey, err := parsePublicKey(raw)
+			if err == nil {
+				fmt.Printf("[license] public key loaded from %s\n", url)
+				return pubKey, nil
+			}
+			lastErr = err
+		}
+	}
+	return nil, lastErr
+}
+
+func parsePublicKey(raw string) (interface{}, error) {
+	block, _ := pem.Decode([]byte(raw))
+	if block == nil {
+		return nil, errors.New("invalid public key pem")
+	}
+	pubAny, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	switch k := pubAny.(type) {
+	case *rsa.PublicKey:
+		return k, nil
+	case *ecdsa.PublicKey:
+		return k, nil
+	default:
+		return nil, fmt.Errorf("unsupported public key type: %T", pubAny)
+	}
 }
 

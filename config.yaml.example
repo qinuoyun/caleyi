@@ -43,3 +43,13 @@ cors:
 
 tenant:
   auth: true
+
+license:
+  server: ""                # 可留空，默认依次尝试 https://auth.caleyi.com -> http://auth.caleyi.com -> http://authback.caleyi.com
+  api_key: ""
+  app_id: ""
+  device_name: ""
+  remark: ""
+  store_file: runtime/license.json
+  poll_interval_sec: 5
+  poll_timeout_sec: 600
