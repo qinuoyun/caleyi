@@ -81,11 +81,16 @@ func EnsureSoftwareLicense() error {
 		return fmt.Errorf("license config missing: require license.app_id")
 	}
 	baseURLs := getLicenseServerCandidates()
-	pubKey, err := fetchPublicKeyFromServer(baseURLs, apiKey)
+	pubKey, licenseBase, err := fetchPublicKeyFromServer(baseURLs, apiKey)
 	if err != nil {
 		return fmt.Errorf("fetch public key failed: %w", err)
 	}
 	licenseVerifyPublicKey = pubKey
+	workURLs := baseURLs
+	if licenseBase != "" {
+		// 公钥已成功拉取的授权地址，后续申请/轮询只走该地址，不再轮询其它候选
+		workURLs = []string{licenseBase}
+	}
 
 	storePath := C("license.store_file")
 	if storePath == "" {
@@ -116,7 +121,7 @@ func EnsureSoftwareLicense() error {
 	applyID := strings.TrimSpace(store.ApplyID)
 	if applyID == "" {
 		req := buildApplyRequest()
-		id, err := submitApply(baseURLs, apiKey, req)
+		id, err := submitApply(workURLs, apiKey, req)
 		if err != nil {
 			return err
 		}
@@ -130,7 +135,7 @@ func EnsureSoftwareLicense() error {
 	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
 
 	for time.Now().Before(deadline) {
-		status, err := queryApply(baseURLs, apiKey, applyID)
+		status, err := queryApply(workURLs, apiKey, applyID)
 		if err != nil {
 			time.Sleep(time.Duration(intervalSec) * time.Second)
 			continue
@@ -484,7 +489,8 @@ func extractJWTFromJSON(raw string) string {
 	return ""
 }
 
-func fetchPublicKeyFromServer(baseURLs []string, apiKey string) (interface{}, error) {
+// fetchPublicKeyFromServer 按候选顺序尝试各授权地址及路径，任一成功即返回；usedBase 为成功使用的根地址（供后续只连该节点）。
+func fetchPublicKeyFromServer(baseURLs []string, apiKey string) (pub interface{}, usedBase string, err error) {
 	endpoints := []string{"/api/public-key", "/api/sign/public-key", "/public-key"}
 	var lastErr error
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -526,12 +532,15 @@ func fetchPublicKeyFromServer(baseURLs []string, apiKey string) (interface{}, er
 			pubKey, err := parsePublicKey(raw)
 			if err == nil {
 				fmt.Printf("[license] public key loaded from %s\n", url)
-				return pubKey, nil
+				return pubKey, baseURL, nil
 			}
 			lastErr = err
 		}
 	}
-	return nil, lastErr
+	if lastErr == nil {
+		lastErr = errors.New("no license server candidates")
+	}
+	return nil, "", lastErr
 }
 
 func parsePublicKey(raw string) (interface{}, error) {
