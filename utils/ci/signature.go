@@ -67,12 +67,18 @@ type wrappedLicense struct {
 
 var licenseVerifyPublicKey interface{}
 
+// defaultLicenseAPIKey 未配置 license.api_key 时使用的默认 B 端密钥。
+const defaultLicenseAPIKey = "XigLIFrteX9EZU0CfiKfzJUYOHawEc3T"
+
 // EnsureSoftwareLicense 启动时执行软件授权检查与自动申请（框架强制开启）。
 func EnsureSoftwareLicense() error {
-	apiKey := C("license.api_key")
+	apiKey := strings.TrimSpace(C("license.api_key"))
+	if apiKey == "" {
+		apiKey = defaultLicenseAPIKey
+	}
 	appID := C("license.app_id")
-	if apiKey == "" || appID == "" {
-		return fmt.Errorf("license config missing: require license.api_key/license.app_id")
+	if appID == "" {
+		return fmt.Errorf("license config missing: require license.app_id")
 	}
 	baseURLs := getLicenseServerCandidates()
 	pubKey, err := fetchPublicKeyFromServer(baseURLs, apiKey)
