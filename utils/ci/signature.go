@@ -5,22 +5,15 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -326,77 +319,10 @@ func toPositiveInt(raw string, fallback int) int {
 	return n
 }
 
-// buildMachineID 生成跨平台稳定机器码（Mac/Win/Linux）。
-// 规则：OS/ARCH + 主机名 + 系统机器ID + 物理网卡 MAC，做 SHA256。
-func buildMachineID() string {
-	host, _ := os.Hostname()
-	var macs []string
-	ifaces, _ := net.Interfaces()
-	for _, it := range ifaces {
-		// 过滤回环、虚拟和无硬件地址网卡
-		if it.Flags&net.FlagLoopback != 0 || len(it.HardwareAddr) == 0 {
-			continue
-		}
-		name := strings.ToLower(it.Name)
-		if strings.Contains(name, "docker") || strings.Contains(name, "veth") || strings.Contains(name, "vmnet") {
-			continue
-		}
-		macs = append(macs, strings.ToLower(it.HardwareAddr.String()))
-	}
-	sort.Strings(macs)
-	platformID := getPlatformMachineID()
-	base := runtime.GOOS + "|" + runtime.GOARCH + "|" + strings.ToLower(host) + "|" + platformID + "|" + strings.Join(macs, ",")
-	sum := sha256.Sum256([]byte(base))
-	return "MID-" + strings.ToUpper(hex.EncodeToString(sum[:16]))
-}
-
-// getPlatformMachineID 获取系统级机器唯一标识（尽力而为，失败返回空字符串）。
-func getPlatformMachineID() string {
-	switch runtime.GOOS {
-	case "linux":
-		if v := readFirstLine("/etc/machine-id"); v != "" {
-			return strings.ToLower(v)
-		}
-		if v := readFirstLine("/var/lib/dbus/machine-id"); v != "" {
-			return strings.ToLower(v)
-		}
-	case "darwin":
-		out, err := exec.Command("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
-		if err == nil {
-			re := regexp.MustCompile(`"IOPlatformUUID"\s*=\s*"([^"]+)"`)
-			m := re.FindStringSubmatch(string(out))
-			if len(m) > 1 {
-				return strings.ToLower(strings.TrimSpace(m[1]))
-			}
-		}
-	case "windows":
-		out, err := exec.Command("reg", "query", `HKLM\SOFTWARE\Microsoft\Cryptography`, "/v", "MachineGuid").Output()
-		if err == nil {
-			re := regexp.MustCompile(`MachineGuid\s+REG_\w+\s+([^\r\n]+)`)
-			m := re.FindStringSubmatch(string(out))
-			if len(m) > 1 {
-				return strings.ToLower(strings.TrimSpace(m[1]))
-			}
-		}
-	}
-	return ""
-}
-
-func readFirstLine(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	line := strings.TrimSpace(string(b))
-	if i := strings.IndexByte(line, '\n'); i >= 0 {
-		line = strings.TrimSpace(line[:i])
-	}
-	return line
-}
-
 // verifyLicenseSignature 对本地 license 执行 RSA/ECDSA 离线验签（JWT/JWS 格式）。
 // 公钥由授权服务器下发，不依赖本地配置。
 func verifyLicenseSignature(license string) error {
+	fmt.Printf("[license] verify signature GetHardwareUUID=%s\n", GetHardwareUUID())
 	if licenseVerifyPublicKey == nil {
 		return errors.New("verify public key is not initialized")
 	}
@@ -424,7 +350,74 @@ func verifyLicenseSignature(license string) error {
 	if !token.Valid {
 		return errors.New("invalid license token")
 	}
+	if err := verifyLicenseMachineBinding(token); err != nil {
+		return fmt.Errorf("license machine binding: %w", err)
+	}
 	return nil
+}
+
+// verifyLicenseMachineBinding 离线验签通过后，校验 JWT 内设备码与当前机器一致。
+// 支持 claims：machine_id / mid / device_id / hw_id / hardware_uuid（任一有值即参与比对）。
+func verifyLicenseMachineBinding(token *jwt.Token) error {
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return errors.New("license claims must be jwt.MapClaims")
+	}
+
+	var claimVal string
+	for _, key := range []string{"machine_id", "mid", "device_id", "hw_id", "hardware_uuid"} {
+		if v, ok := claims[key]; ok && v != nil {
+			if s, ok := v.(string); ok {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					claimVal = s
+					break
+				}
+			}
+		}
+	}
+	if claimVal == "" {
+		return errors.New("missing machine identifier in license (need machine_id or mid/device_id/hw_id/hardware_uuid)")
+	}
+
+	if licenseMachineClaimMatchesLocal(claimVal) {
+		return nil
+	}
+	return fmt.Errorf("mismatch: license machine=%q local_uuid=%q local_mid=%q",
+		claimVal, GetHardwareUUID(), buildMachineID())
+}
+
+// licenseMachineClaimMatchesLocal 比对授权端下发的设备码与本机 GetHardwareUUID / buildMachineID。
+func licenseMachineClaimMatchesLocal(claim string) bool {
+	claim = strings.TrimSpace(claim)
+	if claim == "" {
+		return false
+	}
+	localUUID := strings.TrimSpace(GetHardwareUUID())
+	localMID := strings.TrimSpace(buildMachineID())
+
+	if strings.EqualFold(claim, localMID) {
+		return true
+	}
+	if strings.EqualFold(claim, localUUID) {
+		return true
+	}
+	// 去掉 MID- 前缀后比对 32 位 hex（大小写不敏感）
+	if normalizeMachineIDHex(claim) == normalizeMachineIDHex(localMID) {
+		return true
+	}
+	if normalizeMachineIDHex(claim) == strings.ToLower(localUUID) {
+		return true
+	}
+	return false
+}
+
+func normalizeMachineIDHex(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(strings.ToUpper(s), "MID-") {
+		s = s[4:]
+	}
+	return strings.ToLower(s)
 }
 
 // normalizeLicenseToken 兼容两种 license 格式：
@@ -553,4 +546,3 @@ func parsePublicKey(raw string) (interface{}, error) {
 		return nil, fmt.Errorf("unsupported public key type: %T", pubAny)
 	}
 }
-

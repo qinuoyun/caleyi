@@ -70,6 +70,7 @@ func GenerateToken(claims *UserClaims) (string, error) {
 	}
 
 	// 生成token
+	fmt.Printf("[jwt] sign token GetHardwareUUID=%s\n", ci.GetHardwareUUID())
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, customClaims)
 	signedToken, err := token.SignedString(secret)
 	if err != nil {
@@ -147,6 +148,7 @@ func JwtVerify(c *gin.Context) {
 
 // ParseToken 解析Token
 func ParseToken(tokenString string) (*CustomClaims, error) {
+	fmt.Printf("[jwt] parse token GetHardwareUUID=%s\n", ci.GetHardwareUUID())
 	// 定义声明结构体
 	claims := &CustomClaims{}
 
