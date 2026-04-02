@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 var (
@@ -14,6 +16,20 @@ var (
 	softwareModules     map[string]interface{}
 	softwareServices    map[string]interface{}
 )
+
+// WSHandlerFn WS 控制器注册回调
+// 在控制器包的 init() 中调用 BinWSController，传入在路由组上注册路由的闭包。
+//
+// 示例：
+//
+//	func init() {
+//	    ci.BinWSController(func(g *gin.RouterGroup) {
+//	        g.GET("/agent/chat", WSController{}.Chat)
+//	    })
+//	}
+type WSHandlerFn func(group *gin.RouterGroup)
+
+var wsHandlers []WSHandlerFn
 
 // 在包初始化时调用 SoftwareInit
 func init() {
@@ -26,6 +42,7 @@ func SoftwareInit() {
 	softwareControllers = make(map[string]interface{})
 	softwareModules = make(map[string]interface{})
 	softwareServices = make(map[string]interface{})
+	wsHandlers = nil
 }
 
 // GetControllerPrefixRegex 使用正则表达式从路径中提取"controllers"前的元素
@@ -210,4 +227,15 @@ func extractModuleName(typeName string) string {
 
 	// 转换为小写并添加斜杠
 	return "/" + strings.ToLower(typeName) + "/"
+}
+
+// BinWSController 注册 WebSocket 控制器到 ws 路由组。
+// 路由前缀由 config ws.prefix（默认 /ws）决定，在 InitRouter() 中自动创建。
+func BinWSController(fn WSHandlerFn) {
+	wsHandlers = append(wsHandlers, fn)
+}
+
+// GetWSHandlersList 获取所有已注册的 WS 控制器回调
+func GetWSHandlersList() []WSHandlerFn {
+	return wsHandlers
 }

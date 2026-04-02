@@ -370,6 +370,36 @@ func InitRouter() *gin.Engine {
 	//绑定插件路由
 	BindSoftwareRoutes(R, apiGroup)
 
+	// ========== WebSocket 路由组（/ws，由 ci.BinWSController 注册） ==========
+	BindWSRoutes(R)
+
 	//返回实例
 	return R
+}
+
+// BindWSRoutes 创建 ws 路由组并注册所有通过 ci.BinWSController 绑定的控制器。
+// 路由前缀和鉴权行为由 config ws.* 控制：
+//
+//	ws.enabled       true/false（默认 true，false 时跳过注册）
+//	ws.prefix        路由前缀，默认 /ws
+//	ws.require_auth  true/false（默认 true，false 仅开发调试用）
+//	ws.default_tenant  tenant_id 兜底值，为空时取 app.tenant_id
+func BindWSRoutes(R *gin.Engine) {
+	if ci.C("ws.enabled") == "false" {
+		return
+	}
+	handlers := ci.GetWSHandlersList()
+	if len(handlers) == 0 {
+		return
+	}
+	prefix := ci.C("ws.prefix")
+	if prefix == "" {
+		prefix = "/ws"
+	}
+	fmt.Printf("[ws] 注册 WS 路由组 %s，控制器数: %d\n", prefix, len(handlers))
+	wsGroup := R.Group(prefix)
+	wsGroup.Use(middleware.WsVerify)
+	for _, fn := range handlers {
+		fn(wsGroup)
+	}
 }
