@@ -44,6 +44,11 @@ cors:
 tenant:
   auth: true
 
+# Agent HTTP（根路径前缀，默认 /agent；与 /api 共用 JWT、租户中间件；业务侧 ci.BinAgentRoutes 注册具体路由）
+agent:
+  enabled: true     # false 时不挂载
+  prefix: agent     # URL 前缀，默认 agent → /agent/chat 等
+
 license:
   server: ""                # 可留空，默认依次尝试 https://auth.caleyi.com -> http://auth.caleyi.com -> http://authback.caleyi.com
   api_key: ""

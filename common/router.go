@@ -180,6 +180,59 @@ var frontEndProjects = map[string]string{
 // 静态资源后缀列表（用于过滤，避免静态资源被history路由拦截）
 var staticExts = []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".map", ".json", ".txt"}
 
+// registerAPIMiddlewareChain 与 /api 相同：HandleBefore → 默认 tenant → JWT → TenantVerify → HandleAfter
+func registerAPIMiddlewareChain(g *gin.RouterGroup, middlewareList []interface{}) {
+	RegisterMiddlewareHandlers(g, middlewareList, "before")
+	g.Use(func(c *gin.Context) {
+		if c.GetHeader("tenant_id") == "" && c.Query("tenant_id") == "" {
+			if defaultTenantID := ci.C("app.tenant_id"); defaultTenantID != "" {
+				c.Request.Header.Set("tenant_id", defaultTenantID)
+			}
+		}
+		c.Next()
+	})
+	g.Use(middleware.JwtVerify)
+	g.Use(middleware.TenantVerify)
+	RegisterMiddlewareHandlers(g, middlewareList, "after")
+}
+
+// bindAgentHTTPRoutes 将业务通过 ci.BinAgentRoutes 注册的回调挂到根路径下的 agent 前缀（默认 /agent，非 /api 下）。
+// agent.enabled=false 时不注册；无回调时静默跳过。
+// agent.prefix 为 URL 第一段起的路径，默认 agent（即 /agent/chat 等）。
+func bindAgentHTTPRoutes(R *gin.Engine, middlewareList []interface{}) {
+	if ci.C("agent.enabled") == "false" {
+		return
+	}
+	handlers := ci.GetAgentRoutesHandlersList()
+	if len(handlers) == 0 {
+		return
+	}
+	prefix := strings.TrimSpace(ci.C("agent.prefix"))
+	if prefix == "" {
+		prefix = "agent"
+	}
+	prefix = strings.Trim(prefix, "/")
+	agentG := R.Group("/" + prefix)
+	registerAPIMiddlewareChain(agentG, middlewareList)
+	for _, fn := range handlers {
+		fn(agentG)
+	}
+	fmt.Printf("[agent] 已注册 Agent HTTP 路由: /%s/*（回调 %d 个）\n", prefix, len(handlers))
+}
+
+// agentHTTPPathPrefix 返回 Agent 根路径（含前导 /），与 agent.prefix 配置一致，供 NoRoute 404 判断。
+func agentHTTPPathPrefix() string {
+	p := strings.TrimSpace(ci.C("agent.prefix"))
+	if p == "" {
+		p = "agent"
+	}
+	p = strings.Trim(p, "/")
+	if p == "" {
+		return "/agent"
+	}
+	return "/" + p
+}
+
 func InitRouter() *gin.Engine {
 	//初始化路由
 	R := gin.Default()
@@ -281,29 +334,12 @@ func InitRouter() *gin.Engine {
 	// 获取原始中间件切片（不做任何转换）
 	middlewareList := ci.GetMiddlewaresList()
 
-	// 2. 创建 /api 路由组
+	// 2. 创建 /api 路由组（与 /agent 共用同一套中间件链）
 	apiGroup := R.Group("/api")
-	{
-		// 第一步：注册 HandleBefore 前置中间件（仅 /api 生效）
-		RegisterMiddlewareHandlers(apiGroup, middlewareList, "before")
+	registerAPIMiddlewareChain(apiGroup, middlewareList)
 
-		// 若 config.ini 配置了 app.tenant_id，且请求未带 tenant_id，则自动注入到请求头
-		apiGroup.Use(func(c *gin.Context) {
-			if c.GetHeader("tenant_id") == "" && c.Query("tenant_id") == "" {
-				if defaultTenantID := ci.C("app.tenant_id"); defaultTenantID != "" {
-					c.Request.Header.Set("tenant_id", defaultTenantID)
-				}
-			}
-			c.Next()
-		})
-
-		// 第二步：JWT 验证 + 租户验证（仅 /api 生效）
-		apiGroup.Use(middleware.JwtVerify)
-		apiGroup.Use(middleware.TenantVerify)
-
-		// 第三步：注册 HandleAfter 后置中间件（仅 /api 生效）
-		RegisterMiddlewareHandlers(apiGroup, middlewareList, "after")
-	}
+	// Agent HTTP：根路径 /agent（默认），由 ci.BinAgentRoutes 注入，与 /api 相同鉴权链
+	bindAgentHTTPRoutes(R, middlewareList)
 
 	// ========== 调整NoRoute逻辑：处理根项目的history路由和API 404 ==========
 	R.NoRoute(func(c *gin.Context) {
@@ -319,8 +355,8 @@ func InitRouter() *gin.Engine {
 			}
 		}
 
-		// 2. 如果是 API 请求，返回 JSON 404
-		if strings.HasPrefix(path, "/api") {
+		// 2. 如果是 API 或 Agent 请求，返回 JSON 404
+		if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, agentHTTPPathPrefix()) {
 			c.JSON(404, gin.H{"code": 404, "message": "您" + method + "请求地址：" + path + "不存在！"})
 			return
 		}

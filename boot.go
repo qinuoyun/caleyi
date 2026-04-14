@@ -16,6 +16,7 @@ func init() {
 	}
 }
 
+// BootStart 启动 HTTP 服务。可选：在业务包 init() 中调用 ci.BinAgentRoutes 注入 Agent API（默认前缀 /agent，见 common.bindAgentHTTPRoutes）。
 func BootStart() {
 
 	//初始化中间件
@@ -29,6 +30,10 @@ func BootStart() {
 
 	//加载路由
 	r := common.InitRouter()
+
+	for _, fn := range ci.GetGinAfterRouterHooks() {
+		fn(r)
+	}
 
 	routes := ""
 	for _, route := range r.Routes() {

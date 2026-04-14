@@ -31,6 +31,38 @@ type WSHandlerFn func(group *gin.RouterGroup)
 
 var wsHandlers []WSHandlerFn
 
+// AgentRoutesHandlerFn 在 /api 下注册 Agent HTTP 路由的回调（与 JwtVerify、TenantVerify 同链）。
+// 业务项目在包 init() 中调用 BinAgentRoutes，闭包内对 group 注册路径，例如与 ShendiOS agent/handler.Register 对齐。
+//
+//	func init() {
+//	    ci.BinAgentRoutes(func(g *gin.RouterGroup) {
+//	        handler.Register(g)
+//	    })
+//	}
+//
+// 完整 URL 前缀为 /{agent.prefix}，默认 /agent（见 config agent.prefix，与 /api 平级）。
+type AgentRoutesHandlerFn func(group *gin.RouterGroup)
+
+var agentRoutesHandlers []AgentRoutesHandlerFn
+
+// GinEngineHookFn 在 InitRouter 返回之后、Listen 之前执行，用于注册 HTML 页面、额外静态路由等。
+type GinEngineHookFn func(r *gin.Engine)
+
+var ginAfterRouterHooks []GinEngineHookFn
+
+// BinGinAfterRouter 注册 Gin 引擎后置钩子（可多次调用追加）。
+func BinGinAfterRouter(fn GinEngineHookFn) {
+	if fn == nil {
+		return
+	}
+	ginAfterRouterHooks = append(ginAfterRouterHooks, fn)
+}
+
+// GetGinAfterRouterHooks 供 BootStart 在 InitRouter 之后调用。
+func GetGinAfterRouterHooks() []GinEngineHookFn {
+	return ginAfterRouterHooks
+}
+
 // 在包初始化时调用 SoftwareInit
 func init() {
 	SoftwareInit()
@@ -43,6 +75,8 @@ func SoftwareInit() {
 	softwareModules = make(map[string]interface{})
 	softwareServices = make(map[string]interface{})
 	wsHandlers = nil
+	agentRoutesHandlers = nil
+	ginAfterRouterHooks = nil
 }
 
 // GetControllerPrefixRegex 使用正则表达式从路径中提取"controllers"前的元素
@@ -238,4 +272,14 @@ func BinWSController(fn WSHandlerFn) {
 // GetWSHandlersList 获取所有已注册的 WS 控制器回调
 func GetWSHandlersList() []WSHandlerFn {
 	return wsHandlers
+}
+
+// BinAgentRoutes 注册 Agent HTTP 路由到根路径下的可配置前缀（默认 /agent，与 /api 平级，共用鉴权与租户中间件）。
+func BinAgentRoutes(fn AgentRoutesHandlerFn) {
+	agentRoutesHandlers = append(agentRoutesHandlers, fn)
+}
+
+// GetAgentRoutesHandlersList 获取所有已注册的 Agent 路由回调
+func GetAgentRoutesHandlersList() []AgentRoutesHandlerFn {
+	return agentRoutesHandlers
 }
